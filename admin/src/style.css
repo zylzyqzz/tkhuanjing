@@ -16,6 +16,16 @@
   --yellow: #f2c66e;
   --red: #ff7280;
 }
+[data-theme="cyber"] {
+  --bg:#080616; --sidebar:#0d0a23; --panel:rgba(18,15,45,.92); --panel-strong:#211b53;
+  --line:rgba(121,105,255,.28); --muted:#9a91bd; --blue:#7a74ff; --violet:#38d9ff;
+  --gold:#f4a65d; --green:#42e7b0; --yellow:#ffc266; --red:#ff5f8f;
+}
+[data-theme="daylight"] {
+  color:#183047; background:#eaf1f8; --bg:#eaf1f8; --sidebar:#f7fafc; --panel:#fff;
+  --panel-strong:#e7f0f8; --line:#c2d2e1; --muted:#60758b; --blue:#1677d2;
+  --violet:#159ead; --gold:#b97416; --green:#178a61; --yellow:#a9670b; --red:#c93652;
+}
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 1100px; background: radial-gradient(circle at 72% -15%, rgba(25,85,140,.42) 0, transparent 32%), radial-gradient(circle at 28% 110%, rgba(141,85,22,.18), transparent 31%), var(--bg); }
 body::before { content:""; position:fixed; inset:0; pointer-events:none; opacity:.32; background-image:linear-gradient(rgba(69,135,203,.055) 1px,transparent 1px),linear-gradient(90deg,rgba(69,135,203,.055) 1px,transparent 1px); background-size:48px 48px; mask-image:linear-gradient(to bottom,#000,transparent 80%); }
@@ -90,7 +100,8 @@ td small { display: block; margin-top: 5px; }
 .release-card > button { margin-top: 15px; }
 .empty { padding: 70px; text-align: center; color: #7387a5; }
 .login-shell { min-height: 100vh; display: grid; place-items: center; background: radial-gradient(circle at 50% 0, #1e3c68 0, #0d1b31 28%, #070d19 68%); }
-.login-card { width: 430px; background: rgba(14, 27, 48, .9); border: 1px solid rgba(137, 173, 235, .25); border-radius: 22px; padding: 38px; box-shadow: 0 35px 110px rgba(0, 0, 0, .45); backdrop-filter: blur(18px); }
+.login-card { position:relative; width: 430px; background: rgba(14, 27, 48, .9); border: 1px solid rgba(137, 173, 235, .25); border-radius: 22px; padding: 38px; box-shadow: 0 35px 110px rgba(0, 0, 0, .45); backdrop-filter: blur(18px); }
+.login-theme { position:absolute; right:20px; top:20px; min-height:32px; padding:6px 11px; font-size:12px; }
 .login-card .logo { width: 54px; height: 54px; border-radius: 16px; background: linear-gradient(135deg, var(--blue), var(--violet)); display: grid; place-items: center; font-size: 27px; box-shadow: 0 12px 28px rgba(93, 116, 235, .35); }
 .login-card h1 { margin: 21px 0 6px; font-size: 25px; }
 .login-card p { color: #8295b2; margin: 0 0 26px; }
@@ -135,3 +146,13 @@ td small { display: block; margin-top: 5px; }
 ::-webkit-scrollbar { width: 9px; height: 9px; } ::-webkit-scrollbar-track { background: #091221; } ::-webkit-scrollbar-thumb { background: #29466e; border-radius: 99px; }
 @media(max-width: 1250px) { .metrics { grid-template-columns: repeat(3, 1fr); } .release-grid { grid-template-columns: repeat(2, 1fr); } .code-layout { grid-template-columns: 1fr; } }
 @media(max-width: 900px) { body { min-width: 0; } .app-shell { grid-template-columns: 1fr; } aside { position: static; width: auto; height: auto; } .aside-foot { display: none; } main { grid-column: 1; } .metrics { grid-template-columns: repeat(2, 1fr); } .dash-grid { grid-template-columns: 1fr; } }
+[data-theme="daylight"] body { color:#183047; background:radial-gradient(circle at 72% -15%,#bcdcf3 0,transparent 33%),var(--bg); }
+[data-theme="daylight"] aside { background:linear-gradient(180deg,#f8fbfd,#eaf2f8); box-shadow:18px 0 60px #7892aa1c; }
+[data-theme="daylight"] .brand b,[data-theme="daylight"] header h1,[data-theme="daylight"] .form h2,[data-theme="daylight"] .form h3 { color:#19344d; }
+[data-theme="daylight"] .metric,[data-theme="daylight"] .panel,[data-theme="daylight"] .table-wrap { background:#fff; box-shadow:0 16px 42px #66809a1c; }
+[data-theme="daylight"] input,[data-theme="daylight"] select,[data-theme="daylight"] textarea { background:#f7fafc; color:#183047; border-color:#b9cad9; }
+[data-theme="daylight"] th { background:#e4edf5; color:#526b82; } [data-theme="daylight"] td { color:#294158; }
+[data-theme="daylight"] .ghost,[data-theme="daylight"] .button,[data-theme="daylight"] button { color:#24445f; background:#e8f0f7; border-color:#b9cbda; }
+[data-theme="daylight"] .primary { color:#fff; background:linear-gradient(115deg,var(--blue),var(--violet)); }
+[data-theme="daylight"] .login-shell { background:radial-gradient(circle at 50% 0,#b8d9f0,#eaf1f8 62%); }
+[data-theme="daylight"] .login-card,[data-theme="daylight"] .modal { background:#fff; color:#183047; border-color:#b9ccdd; }

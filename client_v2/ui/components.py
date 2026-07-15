@@ -7,6 +7,8 @@ from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QCursor, QLinearGradient, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMainWindow, QPushButton, QTextEdit, QVBoxLayout, QWidget
 
+from .theme import COLORS
+
 
 class FramelessWindow(QMainWindow):
     """Native-feeling frameless window with system move and resize support."""
@@ -103,6 +105,11 @@ class TechBackdrop(QWidget):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
         self.timer.start(45)
+        self.theme_id = "obsidian"
+
+    def set_theme(self, theme_id: str) -> None:
+        self.theme_id = theme_id
+        self.update()
 
     def set_reduced(self, reduced: bool) -> None:
         self.reduced = reduced
@@ -116,13 +123,17 @@ class TechBackdrop(QWidget):
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.fillRect(self.rect(), QColor("#050A12"))
+        painter.fillRect(self.rect(), QColor(COLORS["bg"]))
         radial = QLinearGradient(0, 0, self.width(), self.height())
-        radial.setColorAt(0, QColor(7, 18, 35, 245))
-        radial.setColorAt(.48, QColor(5, 12, 23, 248))
-        radial.setColorAt(1, QColor(10, 8, 17, 250))
+        if self.theme_id == "daylight":
+            radial.setColorAt(0, QColor(247, 251, 255, 250)); radial.setColorAt(.48, QColor(235, 243, 250, 250)); radial.setColorAt(1, QColor(228, 238, 247, 250))
+        elif self.theme_id == "cyber":
+            radial.setColorAt(0, QColor(18, 14, 46, 248)); radial.setColorAt(.48, QColor(8, 9, 28, 250)); radial.setColorAt(1, QColor(18, 7, 31, 250))
+        else:
+            radial.setColorAt(0, QColor(7, 18, 35, 245)); radial.setColorAt(.48, QColor(5, 12, 23, 248)); radial.setColorAt(1, QColor(10, 8, 17, 250))
         painter.fillRect(self.rect(), radial)
-        painter.setPen(QPen(QColor(70, 132, 214, 18), 1))
+        grid = QColor(COLORS["blue"]); grid.setAlpha(18 if self.theme_id != "daylight" else 25)
+        painter.setPen(QPen(grid, 1))
         spacing = 48
         offset = 0 if self.reduced else self.phase % spacing
         for x in range(-spacing + offset, self.width(), spacing):
@@ -134,7 +145,8 @@ class TechBackdrop(QWidget):
         for index in range(count):
             x = (index * 173 + self.phase * (1 + index % 3)) % max(self.width(), 1)
             y = (index * 97 + self.phase * .35) % max(self.height(), 1)
-            painter.setBrush(QColor(70, 154, 255, 25 + index % 4 * 10))
+            particle = QColor(COLORS["blue"]); particle.setAlpha(25 + index % 4 * 10)
+            painter.setBrush(particle)
             painter.drawEllipse(QPointF(x, y), 1.5 + index % 3, 1.5 + index % 3)
 
 
@@ -207,6 +219,10 @@ class ScanCore(QWidget):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
         self.setMinimumSize(360, 360)
+        self.theme_id = "obsidian"
+
+    def set_theme(self, theme_id: str) -> None:
+        self.theme_id = theme_id; self.update()
 
     def start(self) -> None:
         self.running = True
@@ -254,18 +270,18 @@ class ScanCore(QWidget):
                     orbit = radius * (.38 + (index % 4) * .16)
                     painter.setBrush(QColor(80, 174, 255, 80 + index % 3 * 45))
                     painter.drawEllipse(QPointF(center.x() + math.cos(angle) * orbit, center.y() + math.sin(angle) * orbit), 2 + index % 2, 2 + index % 2)
-        accent = QColor("#4DAAFF")
-        if self.result == "PASS": accent = QColor("#4EE0A1")
-        if self.result == "WARNING": accent = QColor("#F2B45F")
-        if self.result == "FAIL": accent = QColor("#FF6075")
+        accent = QColor(COLORS["blue"])
+        if self.result == "PASS": accent = QColor(COLORS["pass"])
+        if self.result == "WARNING": accent = QColor(COLORS["warning"])
+        if self.result == "FAIL": accent = QColor(COLORS["fail"])
         pulse = 1 + (.06 * math.sin(math.radians(self.phase * 3)) if self.running else 0)
         core = radius * .28 * pulse
         painter.setPen(QPen(QColor(accent.red(), accent.green(), accent.blue(), 75), 14))
         painter.drawRoundedRect(QRectF(center.x() - core, center.y() - core, core * 2, core * 2), 22, 22)
         painter.setPen(QPen(accent, 2))
-        painter.setBrush(QColor(7, 21, 38, 245))
+        painter.setBrush(QColor(COLORS["surface"]))
         painter.drawRoundedRect(QRectF(center.x() - core, center.y() - core, core * 2, core * 2), 22, 22)
-        painter.setPen(QColor("#EAF4FF"))
+        painter.setPen(QColor(COLORS["text"]))
         painter.drawText(QRectF(center.x() - core, center.y() - 16, core * 2, 32), Qt.AlignCenter, "检测中" if self.running else self.result or "READY")
 
 

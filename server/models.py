@@ -48,6 +48,14 @@ class Release(Base):
     signature: Mapped[str] = mapped_column(Text, default="")
 
 
+class DownloadStat(Base):
+    __tablename__ = "download_stats"
+    day: Mapped[str] = mapped_column(String(10), primary_key=True)
+    version: Mapped[str] = mapped_column(String(40), primary_key=True)
+    count: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[str] = mapped_column(String(40), default=now_iso)
+
+
 class Setting(Base):
     __tablename__ = "settings"
     key: Mapped[str] = mapped_column(String(80), primary_key=True)
@@ -122,6 +130,12 @@ class CheckReport(Base):
     before_snapshot_json: Mapped[str] = mapped_column(Text, default="{}")
     after_snapshot_json: Mapped[str] = mapped_column(Text, default="{}")
     confidence_summary_json: Mapped[str] = mapped_column(Text, default="{}")
+    readiness_level: Mapped[str] = mapped_column(String(30), default="INCOMPLETE", index=True)
+    blocking_count: Mapped[int] = mapped_column(Integer, default=0)
+    high_risk_count: Mapped[int] = mapped_column(Integer, default=0)
+    test_mode: Mapped[str] = mapped_column(String(20), default="standard")
+    baseline_delta_json: Mapped[str] = mapped_column(Text, default="{}")
+    source_health_json: Mapped[str] = mapped_column(Text, default="{}")
     uploaded_at: Mapped[str] = mapped_column(String(40), default=now_iso)
     items: Mapped[list[CheckItem]] = relationship(cascade="all, delete-orphan")
 
@@ -151,6 +165,9 @@ class CheckItem(Base):
     verification_json: Mapped[str] = mapped_column(Text, default="[]")
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
     error_code: Mapped[str] = mapped_column(String(100), default="")
+    priority: Mapped[str] = mapped_column(String(30), default="INFORMATIONAL")
+    blocking: Mapped[bool] = mapped_column(Boolean, default=False)
+    repair_outcome_json: Mapped[str] = mapped_column(Text, default="{}")
 
 
 class CheckProfile(Base):

@@ -49,3 +49,6 @@ class ClientApi:
 
     def update_info(self) -> dict:
         return self.request("GET", "/api/v1/client/update")
+
+    def changelog(self) -> dict:
+        return self.request("GET", "/api/v1/client/changelog")

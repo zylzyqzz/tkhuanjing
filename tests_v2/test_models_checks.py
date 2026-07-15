@@ -49,7 +49,7 @@ def test_report_precedence_and_schema():
     report.finalize()
     assert report.overall_status == Status.FAIL
     payload = report.to_dict()
-    assert payload["schema_version"] == 4
+    assert payload["schema_version"] == 5
     assert payload["run_mode"] == "daily_preflight"
     assert "check_logs" in payload and "environment_snapshot" in payload
     assert report.to_dict()["items"][1]["status"] == "FAIL"
@@ -59,3 +59,4 @@ def test_warning_when_unknown_present():
     report = CheckReport("device", "2.3.0", [CheckResult("x", "客户端", Status.UNKNOWN, "测试")])
     report.finalize()
     assert report.overall_status == Status.WARNING
+    assert report.readiness_level == "READY_WITH_RISK"

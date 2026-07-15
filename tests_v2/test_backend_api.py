@@ -131,6 +131,8 @@ def test_paid_activation_release_manifest_and_update_compatibility(tmp_path):
         installer = b"MZ" + b"candidate-installer" * 100
         published = client.post("/tk-api/release", headers=admin_headers, data={"version": "2.2.0", "title": "候选版", "notes": "摘要", "details": "完整更新说明", "channel": "stable", "minimum_version": "2.1.0"}, files={"file": ("setup.exe", installer, "application/octet-stream")})
         assert published.status_code == 200, published.text
+        assert published.json()["status"] == "pending"
+        assert client.post("/tk-api/release/activate", headers=admin_headers, json={"version": "2.2.0"}).status_code == 200
         manifest = client.get("/api/v1/client/update").json()
         assert manifest["version"] == "2.2.0"
         assert manifest["file_size"] == len(installer)
@@ -162,7 +164,8 @@ def test_public_download_page(tmp_path):
     with build_client(tmp_path) as client:
         page = client.get("/download/")
         assert page.status_code == 200
-        assert "技术准备度" in page.text
+        assert page.history and page.history[0].status_code == 308
+        assert "开播前" in page.text
         health = client.get("/api/v1/health")
         assert health.status_code == 200
         assert health.json()["database"] == "ok"

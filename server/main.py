@@ -2,17 +2,21 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import text
+from sqlalchemy import select, text
+from sqlalchemy.orm import Session
 
 from .config import get_settings
-from .database import SessionLocal
+from .database import SessionLocal, get_db
+from .models import DownloadStat, Release, Setting, now_iso
+from .public_page import render_home, unavailable_page
 from .migrate import run as migrate
 from .routers import admin, client
 
@@ -25,7 +29,7 @@ if not logger.handlers:
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     logger.addHandler(handler)
 
-app = FastAPI(title="TK 直播开播检测平台", version="2.4.0", docs_url="/api/docs" if settings.env != "production" else None)
+app = FastAPI(title="TK 直播开播检测平台", version="2.5.0", docs_url="/api/docs" if settings.env != "production" else None)
 app.include_router(client.router, prefix="/api/v1/client")
 app.include_router(client.router, prefix="/api/client", include_in_schema=False)
 app.include_router(admin.router)
@@ -81,23 +85,36 @@ async def validation_error(request: Request, exc: RequestValidationError) -> JSO
     return JSONResponse(status_code=422, content={"error": {"code": "VALIDATION_ERROR", "message": "提交内容格式不正确", "details": exc.errors()}})
 
 
-PUBLIC_PAGE = """<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>维度 TikTok 直播开播助手</title><style>
-*{box-sizing:border-box}body{margin:0;background:#07101f;color:#e7edf8;font:15px/1.7 "Microsoft YaHei UI",sans-serif}a{color:inherit}
-.nav{height:68px;display:flex;align-items:center;justify-content:space-between;max-width:1120px;margin:auto;padding:0 24px}.brand{font-weight:800;font-size:18px}.tag{color:#8ca0bf}
-.hero{max-width:1120px;margin:72px auto 0;padding:0 24px;display:grid;grid-template-columns:1.25fr .75fr;gap:44px;align-items:center}.badge{display:inline-block;color:#63d6a4;background:#122c29;border:1px solid #245846;padding:5px 12px;border-radius:99px}.hero h1{font-size:48px;line-height:1.15;margin:18px 0}.hero p{color:#9badc9;font-size:17px}.btn{display:inline-block;background:#3e7bfa;padding:13px 24px;border-radius:10px;text-decoration:none;font-weight:700;margin-top:15px}.panel{background:#0e1a2d;border:1px solid #1d2c45;border-radius:20px;padding:24px;box-shadow:0 24px 80px #0008}.status{display:flex;justify-content:space-between;padding:14px 0;border-bottom:1px solid #21304a}.pass{color:#62d49e}.warn{color:#f5c465}.grid{max-width:1120px;margin:90px auto;padding:0 24px;display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.card{background:#0c1728;border:1px solid #192943;border-radius:14px;padding:22px}.card h3{margin:0 0 8px}.card p{color:#8fa2c0}.foot{max-width:1120px;margin:40px auto;padding:30px 24px;color:#7386a3;border-top:1px solid #17263e}@media(max-width:800px){.hero{grid-template-columns:1fr}.hero h1{font-size:36px}.grid{grid-template-columns:1fr}}
-</style></head><body><nav class="nav"><div class="brand">◈ 维度 TikTok 直播开播助手</div><div class="tag">开播前，先检查</div></nav>
-<main class="hero"><section><span class="badge">专业直播技术准备度检测</span><h1>让每一次电脑直播<br>从准备充分开始</h1><p>集中检查网络稳定性、电脑性能、直播设备、系统状态和直播软件准备情况，快速定位影响开播的实际问题。</p><a class="btn" href="/api/v1/client/update">下载最新版</a></section>
-<section class="panel"><h3>开播检查概览</h3><div class="status"><span>网络持续上传</span><b class="pass">通过</b></div><div class="status"><span>摄像头与麦克风</span><b class="pass">通过</b></div><div class="status"><span>硬件编码能力</span><b class="warn">建议确认</b></div><div class="status"><span>系统准备状态</span><b class="pass">通过</b></div></section></main>
-<section class="grid"><article class="card"><h3>一次完成全面检查</h3><p>七组核心检查统一执行，结果按严重程度排列。</p></article><article class="card"><h3>问题说清楚</h3><p>每个异常都包含原因、影响和可执行处理建议。</p></article><article class="card"><h3>适合工作室协作</h3><p>检查报告可保存、导出并主动上传给技术支持。</p></article></section>
-<footer class="foot">本产品仅判断电脑、网络、设备和直播软件的技术准备情况，不代表平台账号审核、流量或开播权限结果。</footer></body></html>"""
-
-
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
-@app.get("/download/", response_class=HTMLResponse, include_in_schema=False)
-def download_page() -> str:
-    return PUBLIC_PAGE
+def home_page(db: Session = Depends(get_db)) -> str:
+    values = {row.key: row.value for row in db.scalars(select(Setting)).all()}
+    release = db.scalar(select(Release).where(Release.active.is_(True), Release.channel == "stable").limit(1))
+    return render_home(values, release)
+
+
+@app.get("/download/", include_in_schema=False)
+def legacy_download_page() -> RedirectResponse:
+    return RedirectResponse("/", status_code=308)
+
+
+@app.get("/download/latest", include_in_schema=False)
+def latest_download(db: Session = Depends(get_db)):
+    release = db.scalar(select(Release).where(Release.active.is_(True), Release.channel == "stable").limit(1))
+    if not release:
+        return HTMLResponse(unavailable_page(), status_code=503)
+    filename = release.installer_filename or release.filename
+    target = settings.downloads_dir / Path(filename).name
+    if not target.is_file() or target.stat().st_size != release.file_size:
+        logger.error("active_release_file_invalid version=%s file=%s", release.version, target)
+        return HTMLResponse(unavailable_page(), status_code=503)
+    day = datetime.now().date().isoformat()
+    stat = db.get(DownloadStat, {"day": day, "version": release.version})
+    if stat:
+        stat.count += 1; stat.updated_at = now_iso()
+    else:
+        db.add(DownloadStat(day=day, version=release.version, count=1))
+    db.commit()
+    return FileResponse(target, filename=f"WeiDu-TK-Live-Check-{release.version}.exe", media_type="application/octet-stream", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/downloads/{filename}", include_in_schema=False)
@@ -120,3 +137,8 @@ def admin_page(path: str = ""):
     if index.exists():
         return FileResponse(index)
     return HTMLResponse("<h1>管理端尚未构建</h1><p>请在 admin 目录执行 npm install 与 npm run build。</p>", status_code=503)
+
+
+@app.get("/{path:path}", response_class=HTMLResponse, include_in_schema=False)
+def branded_not_found(path: str) -> HTMLResponse:
+    return HTMLResponse("""<!doctype html><meta charset='utf-8'><title>页面不存在</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#030812;color:#eef7ff;font-family:'Microsoft YaHei UI';text-align:center}.box{padding:46px;border:1px solid #244768;border-radius:22px;background:#0a1726}b{font:900 64px/1 monospace;color:#4dbbff}p{color:#8197ae}a{color:#55d6d0}</style><div class='box'><b>404</b><h1>页面不存在</h1><p>请返回产品主页或检查访问地址。</p><a href='/'>返回主页</a></div>""", status_code=404)

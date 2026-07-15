@@ -46,6 +46,9 @@ class CheckItemIn(BaseModel):
     verification_check_ids: list[str] = Field(default_factory=list, max_length=50)
     duration_ms: int = Field(default=0, ge=0, le=3_600_000)
     error_code: str = Field(default="", max_length=100)
+    priority: Literal["BLOCKING", "HIGH_RISK", "ADVISORY", "INFORMATIONAL"] = "INFORMATIONAL"
+    blocking: bool = False
+    repair_outcome: dict[str, Any] = Field(default_factory=dict)
 
 
 class ReportIn(BaseModel):
@@ -70,6 +73,12 @@ class ReportIn(BaseModel):
     before_snapshot: dict[str, Any] = Field(default_factory=dict)
     after_snapshot: dict[str, Any] = Field(default_factory=dict)
     confidence_summary: dict[str, Any] = Field(default_factory=dict)
+    readiness_level: Literal["READY", "READY_WITH_RISK", "NOT_READY", "INCOMPLETE"] = "INCOMPLETE"
+    blocking_count: int = Field(default=0, ge=0, le=300)
+    high_risk_count: int = Field(default=0, ge=0, le=300)
+    test_mode: Literal["quick", "standard", "deep"] = "standard"
+    baseline_delta: dict[str, Any] = Field(default_factory=dict)
+    source_health: dict[str, Any] = Field(default_factory=dict)
     items: list[CheckItemIn] = Field(max_length=300)
 
 

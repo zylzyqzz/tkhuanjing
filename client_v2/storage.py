@@ -17,9 +17,12 @@ LICENSE_FILE = DATA_DIR / "license-v2.json"
 QUEUE_FILE = DATA_DIR / "pending-sync.json"
 
 DEFAULT_CONFIG = {
-    "schema_version": 6, "target_region_id": "us-los-angeles", "target_host": "tk.aimj.xin",
+    "schema_version": 7, "target_region_id": "us-los-angeles", "target_host": "tk.aimj.xin",
     "api_base": "https://tk.aimj.xin", "device_id": "", "device_token": "",
-    "privacy_confirm_upload": True, "reduced_effects": False,
+    "privacy_confirm_upload": True, "reduced_effects": False, "theme_id": "obsidian",
+    "effects_level": "full", "font_scale": "standard", "test_mode": "standard",
+    "result_sound": True, "auto_open_report": True, "update_check_on_start": True,
+    "report_retention_days": 90, "upload_confirm": True,
 }
 
 
@@ -85,6 +88,14 @@ def load_config() -> dict:
         if config.get("target_host") in {"v.wdai.cc", "tk.wdai.cc"}:
             config["target_host"] = "tk.aimj.xin"
         config["schema_version"] = 6
+    if int(config.get("schema_version", 1)) < 7:
+        config["theme_id"] = "obsidian"
+        config["effects_level"] = "light" if config.get("reduced_effects") else "full"
+        config["font_scale"] = "standard"; config["test_mode"] = "standard"
+        config["result_sound"] = True; config["auto_open_report"] = True
+        config["update_check_on_start"] = True; config["report_retention_days"] = 90
+        config["upload_confirm"] = bool(config.get("privacy_confirm_upload", True))
+        config["schema_version"] = 7
     for key, value in DEFAULT_CONFIG.items():
         config.setdefault(key, value)
     if not config["device_id"]:
@@ -94,7 +105,7 @@ def load_config() -> dict:
 
 
 def save_config(config: dict) -> None:
-    config["schema_version"] = 6
+    config["schema_version"] = 7
     atomic_json(CONFIG_FILE, config)
 
 
@@ -121,6 +132,37 @@ def load_reports(limit: int = 100) -> list[dict]:
         if value:
             result.append(value)
     return result
+
+
+def cleanup_reports(retention_days: int) -> int:
+    if retention_days <= 0:
+        return 0
+    import time
+    cutoff = time.time() - retention_days * 86400
+    removed = 0
+    for path in REPORT_DIR.glob("*.json"):
+        if path.stat().st_mtime < cutoff:
+            path.unlink(missing_ok=True); removed += 1
+    return removed
+
+
+def baseline_delta(current: dict, previous: dict | None) -> dict:
+    if not previous:
+        return {"available": False}
+    def metric(report: dict, check_id: str, key: str):
+        snapshot = report.get("network_snapshot", {}) if check_id.startswith("network.") else report.get("device_snapshot", {})
+        return (snapshot.get(check_id) or {}).get(key)
+    changes = {}
+    for label, check_id, key in (("upload_mbps", "network.throughput", "upload_mbps"), ("download_mbps", "network.throughput", "download_mbps"), ("cpu_percent", "performance.cpu", "percent"), ("memory_percent", "performance.memory", "percent")):
+        now, before = metric(current, check_id, key), metric(previous, check_id, key)
+        if isinstance(now, (int, float)) and isinstance(before, (int, float)):
+            changes[label] = {"before": before, "current": now, "change": round(now - before, 2)}
+    old = {item.get("check_id"): item.get("status") for item in previous.get("items", [])}
+    new = {item.get("check_id"): item.get("status") for item in current.get("items", [])}
+    changes["new_issues"] = [key for key, value in new.items() if value in {"FAIL", "WARNING"} and old.get(key) not in {"FAIL", "WARNING"}]
+    changes["resolved"] = [key for key, value in old.items() if value in {"FAIL", "WARNING"} and new.get(key) == "PASS"]
+    changes["available"] = True
+    return changes
 
 
 def queue_report(report_id: str) -> None:

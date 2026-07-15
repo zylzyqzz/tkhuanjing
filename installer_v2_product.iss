@@ -1,5 +1,5 @@
 #define MyAppName "维度 TikTok 直播开播助手"
-#define MyAppVersion "2.4.0"
+#define MyAppVersion "2.5.0"
 #define MyAppExeName "TKLiveCheck.exe"
 
 [Setup]
@@ -12,7 +12,7 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=dist_setup_v2
-OutputBaseFilename=维度TikTok直播开播助手安装程序-2.4.0
+OutputBaseFilename=维度TikTok直播开播助手安装程序-2.5.0
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -22,7 +22,7 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 CloseApplications=yes
 RestartApplications=yes
 ArchitecturesAllowed=x64compatible
-VersionInfoVersion=2.4.0.0
+VersionInfoVersion=2.5.0.0
 VersionInfoProductName={#MyAppName}
 VersionInfoCompany=维度光年
 

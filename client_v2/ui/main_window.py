@@ -6,13 +6,14 @@ from pathlib import Path
 import sys
 import threading
 import uuid
+import zipfile
 
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QFileDialog,
     QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QProgressBar,
-    QPushButton, QScrollArea, QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QPushButton, QScrollArea, QStackedWidget, QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from .. import APP_NAME, APP_VERSION
@@ -22,11 +23,11 @@ from ..environment_setup import SetupAction, capture_environment_snapshot, execu
 from ..events import CheckEvent
 from ..models import CheckReport, CheckResult, SEVERITY, Status
 from ..regions import REGIONS, get_region
-from ..storage import configure_logging, load_config, load_license, load_reports, queue_report, save_config, save_license, save_report
+from ..storage import CONFIG_FILE, DATA_DIR, DEFAULT_CONFIG, REPORT_DIR, baseline_delta, cleanup_reports, configure_logging, load_config, load_license, load_reports, queue_report, save_config, save_license, save_report
 from ..streaming_config import discover_streaming_profiles
 from ..updater import UpdateError, download_update, launch_helper
 from .components import FramelessWindow, MetricCard, ModeCard, ModuleTile, ScanCore, TechBackdrop, TerminalLog, TitleBar
-from .theme import COLORS, STYLESHEET
+from .theme import COLORS, THEMES, apply_theme
 
 
 def resource_dir() -> Path:
@@ -112,7 +113,7 @@ class CheckWorker(QObject):
                     level = "success" if result.status == "success" else "fail"
                     self._emit_event(CheckEvent("repair_finished", "setup", f"{result.title}：{result.message}", level, percent))
                 self.setup_record["status"] = "configured"
-            context = CheckContext(profile, region, self.config["target_host"], api, resource_dir(), APP_VERSION, online, self.cancelled, self._emit_event, self.paused)
+            context = CheckContext(profile, region, self.config["target_host"], api, resource_dir(), APP_VERSION, online, self.cancelled, self._emit_event, self.paused, self.config.get("test_mode", "standard"))
             items = run_checks(context, lambda value, text: self.progress.emit(max(value, 23 if self.run_mode == "environment_setup" else value), text))
             after = capture_environment_snapshot(region, resource_dir()) if self.run_mode == "environment_setup" else {}
             report = CheckReport(self.config["device_id"], APP_VERSION, items, target_region_id=region.region_id, run_mode=self.run_mode)
@@ -131,6 +132,10 @@ class CheckWorker(QObject):
                 confidence[item.confidence] = confidence.get(item.confidence, 0) + 1
             report.confidence_summary = confidence
             report.finalize()
+            report.test_mode = self.config.get("test_mode", "standard")
+            current = report.to_dict()
+            previous = next((row for row in load_reports(10) if row.get("run_mode") == self.run_mode), None)
+            report.baseline_delta = baseline_delta(current, previous)
             self.completed.emit(report, self.config, license_data)
         except Exception as exc:
             self.failed.emit(str(exc))
@@ -309,11 +314,14 @@ class MainWindow(FramelessWindow):
         self.setWindowIcon(QIcon(str(resource_dir() / "app_icon.ico")))
         self.setMinimumSize(1120, 720)
         self.resize(1360, 850)
-        self.setStyleSheet(STYLESHEET)
+        self.setStyleSheet(apply_theme(self.config.get("theme_id", "obsidian"), self.config.get("font_scale", "standard")))
         self._build()
+        self._apply_theme()
         self._refresh_history()
         self._update_license_label()
         self._show_page(0)
+        if self.config.get("update_check_on_start", True):
+            QTimer.singleShot(1800, lambda: self._check_update(silent=True))
 
     def _build(self) -> None:
         chrome = QWidget()
@@ -355,7 +363,7 @@ class MainWindow(FramelessWindow):
         side.addWidget(self.license_label)
         body_layout.addWidget(sidebar)
         self.backdrop = TechBackdrop()
-        self.backdrop.set_reduced(bool(self.config.get("reduced_effects")))
+        self.backdrop.set_reduced(self.config.get("effects_level", "full") == "light")
         backdrop_layout = QVBoxLayout(self.backdrop)
         backdrop_layout.setContentsMargins(0, 0, 0, 0)
         self.pages = QStackedWidget()
@@ -439,7 +447,7 @@ class MainWindow(FramelessWindow):
         visual = card()
         visual_box = QVBoxLayout(visual)
         self.scan_core = ScanCore()
-        self.scan_core.set_reduced(bool(self.config.get("reduced_effects")))
+        self.scan_core.set_reduced(self.config.get("effects_level", "full") == "light")
         visual_box.addWidget(self.scan_core, 1)
         self.scan_status = QLabel("等待检测任务")
         self.scan_status.setAlignment(Qt.AlignCenter)
@@ -607,46 +615,71 @@ class MainWindow(FramelessWindow):
         return page
 
     def _settings_page(self) -> QWidget:
-        page, layout = self._shell("PRODUCT SETTINGS", "设置与关于", "控制本地服务、视觉特效和更新；隐私边界不会因设置而改变。")
-        form = card()
-        box = QVBoxLayout(form)
-        api_row = QHBoxLayout()
-        api_row.addWidget(QLabel("本地管理服务"))
-        self.api_base = QLineEdit(self.config.get("api_base", "https://tk.aimj.xin"))
-        api_row.addWidget(self.api_base)
-        box.addLayout(api_row)
-        host_row = QHBoxLayout()
-        host_row.addWidget(QLabel("检测服务域名"))
-        self.target_host = QLineEdit(self.config.get("target_host", "tk.aimj.xin"))
-        host_row.addWidget(self.target_host)
-        box.addLayout(host_row)
-        self.reduced_effects = QCheckBox("降低视觉特效（低性能电脑使用）")
-        self.reduced_effects.setChecked(bool(self.config.get("reduced_effects")))
-        box.addWidget(self.reduced_effects)
-        save = QPushButton("保存本机设置")
-        save.setProperty("primary", True)
-        save.clicked.connect(self._save_settings)
-        box.addWidget(save)
-        layout.addWidget(form)
-        about = card()
-        about_box = QVBoxLayout(about)
-        for title, text in (
-            ("当前版本", f"V{APP_VERSION} · 双模式开播检测与环境配置"),
-            ("隐私说明", "不采集账号密码、Cookie、浏览器数据和个人文件；报告只有在您主动操作后上传。"),
-            ("产品边界", "只判断电脑、网络、设备和直播软件的技术准备度，不代表平台审核、流量或开播权限。"),
-        ):
-            heading = QLabel(title)
-            heading.setProperty("subheading", True)
-            about_box.addWidget(heading)
-            body = QLabel(text)
-            body.setWordWrap(True)
-            body.setProperty("muted", True)
-            about_box.addWidget(body)
-        update = QPushButton("检查更新")
-        update.clicked.connect(self._check_update)
-        about_box.addWidget(update)
-        layout.addWidget(about)
-        layout.addStretch()
+        page, layout = self._shell("PRODUCT CONTROL", "设置与关于", "控制检测体验、主题、报告与更新；服务地址和检测阈值由产品安全维护。")
+        tabs = QTabWidget(); tabs.setObjectName("settingsTabs")
+
+        general = QWidget(); general_box = QVBoxLayout(general); general_card = card(); form = QVBoxLayout(general_card)
+        form.addWidget(QLabel("默认目标地区"))
+        self.default_region_setting = QComboBox()
+        for item in REGIONS: self.default_region_setting.addItem(item.label, item.region_id)
+        self.default_region_setting.setCurrentIndex(max(0, self.default_region_setting.findData(self.config.get("target_region_id"))))
+        form.addWidget(self.default_region_setting)
+        self.result_sound = QCheckBox("检测完成后播放提示音"); self.result_sound.setChecked(bool(self.config.get("result_sound", True))); form.addWidget(self.result_sound)
+        self.auto_open_report = QCheckBox("检测完成后自动打开检测报告"); self.auto_open_report.setChecked(bool(self.config.get("auto_open_report", True))); form.addWidget(self.auto_open_report)
+        self.update_on_start = QCheckBox("启动软件时自动检查新版本"); self.update_on_start.setChecked(bool(self.config.get("update_check_on_start", True))); form.addWidget(self.update_on_start)
+        reset = QPushButton("恢复推荐设置"); reset.clicked.connect(self._reset_settings); form.addWidget(reset)
+        general_box.addWidget(general_card); general_box.addStretch(); tabs.addTab(general, "常规设置")
+
+        appearance = QWidget(); appearance_box = QVBoxLayout(appearance); appearance_card = card(); form = QVBoxLayout(appearance_card)
+        form.addWidget(QLabel("产品主题")); self.theme_select = QComboBox()
+        for key, value in THEMES.items(): self.theme_select.addItem(value["name"], key)
+        self.theme_select.setCurrentIndex(max(0, self.theme_select.findData(self.config.get("theme_id", "obsidian"))))
+        self.theme_select.currentIndexChanged.connect(self._preview_theme); form.addWidget(self.theme_select)
+        form.addWidget(QLabel("视觉特效")); self.effects_select = QComboBox()
+        for title, value in (("完整特效", "full"), ("标准特效", "standard"), ("轻量模式", "light")): self.effects_select.addItem(title, value)
+        self.effects_select.setCurrentIndex(max(0, self.effects_select.findData(self.config.get("effects_level", "full")))); form.addWidget(self.effects_select)
+        form.addWidget(QLabel("界面字体")); self.font_select = QComboBox(); self.font_select.addItem("标准", "standard"); self.font_select.addItem("较大", "large")
+        self.font_select.setCurrentIndex(max(0, self.font_select.findData(self.config.get("font_scale", "standard")))); self.font_select.currentIndexChanged.connect(self._preview_theme); form.addWidget(self.font_select)
+        hint = QLabel("主题切换立即生效；轻量模式会降低粒子、扫描和背景绘制频率。"); hint.setProperty("muted", True); hint.setWordWrap(True); form.addWidget(hint)
+        appearance_box.addWidget(appearance_card); appearance_box.addStretch(); tabs.addTab(appearance, "外观与动效")
+
+        detection = QWidget(); detection_box = QVBoxLayout(detection); detection_card = card(); form = QVBoxLayout(detection_card)
+        form.addWidget(QLabel("网络检测强度")); self.test_mode_select = QComboBox()
+        self.test_mode_select.addItem("快速检测 · 约 1–2 分钟 · 约 6 MB", "quick")
+        self.test_mode_select.addItem("标准检测 · 约 2–3 分钟 · 约 12 MB", "standard")
+        self.test_mode_select.addItem("深度检测 · 约 4–6 分钟 · 约 30 MB", "deep")
+        self.test_mode_select.setCurrentIndex(max(0, self.test_mode_select.findData(self.config.get("test_mode", "standard")))); form.addWidget(self.test_mode_select)
+        info = QLabel("七组关键检查始终启用。快速模式适合单项复检，标准模式用于每日开播，深度模式增加上下行采样轮数。检测阈值由管理后台统一下发，避免客户误改标准。")
+        info.setWordWrap(True); info.setProperty("muted", True); form.addWidget(info)
+        detection_box.addWidget(detection_card); detection_box.addStretch(); tabs.addTab(detection, "检测设置")
+
+        privacy = QWidget(); privacy_box = QVBoxLayout(privacy); privacy_card = card(); form = QVBoxLayout(privacy_card)
+        form.addWidget(QLabel(f"本地报告目录\n{REPORT_DIR}"))
+        retention_row = QHBoxLayout(); retention_row.addWidget(QLabel("报告保留时间")); self.retention_select = QComboBox()
+        for title, days in (("30 天", 30), ("90 天", 90), ("180 天", 180), ("永久保留", 0)): self.retention_select.addItem(title, days)
+        self.retention_select.setCurrentIndex(max(0, self.retention_select.findData(int(self.config.get("report_retention_days", 90))))); retention_row.addWidget(self.retention_select); form.addLayout(retention_row)
+        self.upload_confirm = QCheckBox("上传报告前始终要求我确认"); self.upload_confirm.setChecked(bool(self.config.get("upload_confirm", True))); form.addWidget(self.upload_confirm)
+        buttons = QHBoxLayout(); open_dir = QPushButton("打开报告目录"); open_dir.clicked.connect(self._open_report_dir); buttons.addWidget(open_dir)
+        clean = QPushButton("清理过期报告"); clean.clicked.connect(self._cleanup_local_reports); buttons.addWidget(clean)
+        export = QPushButton("导出售后诊断包"); export.clicked.connect(self._export_diagnostics); buttons.addWidget(export); form.addLayout(buttons)
+        privacy_note = QLabel("诊断包只包含软件日志、脱敏配置和最近检测报告，不包含账号密码、Cookie、浏览器数据或个人文件。")
+        privacy_note.setWordWrap(True); privacy_note.setProperty("muted", True); form.addWidget(privacy_note)
+        privacy_box.addWidget(privacy_card); privacy_box.addStretch(); tabs.addTab(privacy, "数据与隐私")
+
+        about = QWidget(); about_box = QVBoxLayout(about); about_card = card(); form = QVBoxLayout(about_card)
+        heading = QLabel(f"维度 TikTok 直播开播助手  V{APP_VERSION}"); heading.setProperty("heading", True); form.addWidget(heading)
+        for title, text in (("版本通道", "正式版 Stable · Schema V5 检测报告"), ("产品定位", "面向 TikTok／跨境电脑直播的开播前技术准备度检测与环境配置。"), ("隐私边界", "不采集账号密码、Cookie、浏览器数据和个人文件。"), ("责任边界", "不代表平台审核、流量、账号质量或开播权限结果。")):
+            label = QLabel(f"{title}  ·  {text}"); label.setWordWrap(True); label.setProperty("muted", True); form.addWidget(label)
+        about_actions = QHBoxLayout(); update = QPushButton("检查更新"); update.setProperty("primary", True); update.clicked.connect(self._check_update); about_actions.addWidget(update)
+        history = QPushButton("查看版本记录"); history.clicked.connect(self._show_changelog); about_actions.addWidget(history)
+        copy_id = QPushButton("复制设备编号"); copy_id.clicked.connect(self._copy_device_id); about_actions.addWidget(copy_id); form.addLayout(about_actions)
+        qr = QHBoxLayout()
+        for title, filename in (("付款二维码", "收款码.jpg"), ("客服二维码", "客服二维码.png")):
+            pane = QVBoxLayout(); pane.addWidget(QLabel(title)); image = QLabel(); pix = QPixmap(str(resource_dir() / filename)); image.setPixmap(pix.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation)); image.setAlignment(Qt.AlignCenter); pane.addWidget(image); qr.addLayout(pane)
+        form.addLayout(qr); about_box.addWidget(about_card); about_box.addStretch(); tabs.addTab(about, "关于与更新")
+
+        layout.addWidget(tabs, 1)
+        save = QPushButton("保存全部设置"); save.setProperty("primary", True); save.clicked.connect(self._save_settings); layout.addWidget(save)
         return page
 
     def _start_setup(self) -> None:
@@ -759,7 +792,8 @@ class MainWindow(FramelessWindow):
         self._render_network()
         self._refresh_history()
         self._update_license_label()
-        QTimer.singleShot(650, lambda: self._show_page(2))
+        if self.config.get("result_sound", True): QApplication.beep()
+        if self.config.get("auto_open_report", True): QTimer.singleShot(650, lambda: self._show_page(2))
 
     def _check_failed(self, message: str) -> None:
         self.scan_core.finish("UNKNOWN")
@@ -774,10 +808,21 @@ class MainWindow(FramelessWindow):
             return
         report = self.current_report
         colors = {Status.PASS: COLORS["pass"], Status.WARNING: COLORS["warning"], Status.FAIL: COLORS["fail"], Status.UNKNOWN: COLORS["unknown"]}
-        self.report_badge.setText(report.overall_status.value)
+        readiness_labels = {
+            "READY": "可以开播", "READY_WITH_RISK": "可以开播 · 存在风险",
+            "NOT_READY": "暂不建议开播", "INCOMPLETE": "关键检测未完成",
+        }
+        self.report_badge.setText(readiness_labels.get(report.readiness_level, report.overall_status.value))
         self.report_badge.setStyleSheet(f"color:{colors[report.overall_status]};")
         counts = {status: sum(item.status == status for item in report.items) for status in Status}
-        self.report_conclusion.setText(f"{report.conclusion}\n{counts[Status.FAIL]} 个严重问题 · {counts[Status.WARNING]} 个风险项 · {counts[Status.PASS]} 项正常 · {counts[Status.UNKNOWN]} 项未完成")
+        baseline = report.baseline_delta or {}
+        comparison = ""
+        if baseline.get("available"):
+            new_count, resolved_count = len(baseline.get("new_issues", [])), len(baseline.get("resolved", []))
+            upload = baseline.get("upload_mbps", {})
+            upload_text = f" · 稳定上传较上次 {'+' if upload.get('change', 0) >= 0 else ''}{upload.get('change')} Mbps" if upload else ""
+            comparison = f"\n与上次比较：新增 {new_count} 项 · 已恢复 {resolved_count} 项{upload_text}"
+        self.report_conclusion.setText(f"{report.conclusion}\n{counts[Status.FAIL]} 个严重问题 · {counts[Status.WARNING]} 个风险项 · {counts[Status.PASS]} 项正常 · {counts[Status.UNKNOWN]} 项未完成{comparison}")
         problems = [item for item in report.items if item.status != Status.PASS]
         safe = [item for item in problems if item.repairable and item.repair_level == "safe"]
         self.repair_all_button.setEnabled(bool(safe))
@@ -790,7 +835,7 @@ class MainWindow(FramelessWindow):
         route = report.network_snapshot.get("network.target_route", {}).get("target_probes", [])
         latency_values = [item.get("connect_ms") for item in route if item.get("connect_ms") is not None]
         self.report_metrics["latency"].set_value(str(round(sum(latency_values) / len(latency_values))) if latency_values else "--")
-        self.home_status.set_value(report.overall_status.value)
+        self.home_status.set_value(readiness_labels.get(report.readiness_level, report.overall_status.value))
         self.home_problems.set_value(str(len(problems)))
         self.home_region.set_value(get_region(report.target_region_id).country_code)
         while self.report_modules.count():
@@ -929,12 +974,14 @@ class MainWindow(FramelessWindow):
         if ok:
             item.details["repair_result"] = message
             item.details["repair_recovery"] = recovery
+            item.repair_outcome = {"status": "success", "message": message, "before": item.value, "recovery": recovery, "verified": False, "timestamp": datetime.now(timezone.utc).isoformat()}
             if self.current_report:
                 self.current_report.repair_events.append({"repair_id": item.repair_id, "before": item.value, "message": message, "recovery": recovery, "status": "success", "timestamp": datetime.now(timezone.utc).isoformat()})
             QMessageBox.information(self, "处理完成", f"{message}\n\n即将自动重新检测，确认问题是否恢复。")
             if recheck:
                 QTimer.singleShot(250, lambda: self._start_check("daily_preflight"))
             return True
+        item.repair_outcome = {"status": "failed", "message": message, "before": item.value, "verified": False, "timestamp": datetime.now(timezone.utc).isoformat()}
         QMessageBox.warning(self, "自动处理未完成", f"{message}\n\n请按照问题卡片中的步骤人工处理后复检。")
         return False
 
@@ -953,7 +1000,7 @@ class MainWindow(FramelessWindow):
         if not self.current_report:
             QMessageBox.information(self, "尚无报告", "请先完成一次开播检查。")
             return
-        if QMessageBox.question(self, "主动上传报告", "报告只包含技术检测结果，不包含账号密码、Cookie 或个人文件。确认上传？") != QMessageBox.Yes:
+        if self.config.get("upload_confirm", True) and QMessageBox.question(self, "主动上传报告", "报告只包含技术检测结果，不包含账号密码、Cookie 或个人文件。确认上传？") != QMessageBox.Yes:
             return
         try:
             api = ClientApi(self.config["api_base"], self.config.get("device_token", ""))
@@ -1037,25 +1084,83 @@ class MainWindow(FramelessWindow):
             self.service_license.setText(text.replace("\n", "  ·  "))
 
     def _save_settings_silent(self) -> None:
+        region_id = self.default_region_setting.currentData() if hasattr(self, "default_region_setting") else self.region.currentData()
         self.config.update({
-            "target_region_id": self.region.currentData(),
-            "api_base": self.api_base.text().strip().rstrip("/"),
-            "target_host": self.target_host.text().strip(),
-            "reduced_effects": self.reduced_effects.isChecked(),
+            "target_region_id": region_id,
+            "theme_id": self.theme_select.currentData(), "effects_level": self.effects_select.currentData(),
+            "font_scale": self.font_select.currentData(), "test_mode": self.test_mode_select.currentData(),
+            "result_sound": self.result_sound.isChecked(), "auto_open_report": self.auto_open_report.isChecked(),
+            "update_check_on_start": self.update_on_start.isChecked(), "report_retention_days": self.retention_select.currentData(),
+            "upload_confirm": self.upload_confirm.isChecked(), "privacy_confirm_upload": self.upload_confirm.isChecked(),
+            "reduced_effects": self.effects_select.currentData() == "light",
         })
+        region_index = self.region.findData(region_id)
+        if region_index >= 0: self.region.setCurrentIndex(region_index)
         save_config(self.config)
-        self.backdrop.set_reduced(self.reduced_effects.isChecked())
-        self.scan_core.set_reduced(self.reduced_effects.isChecked())
+        reduced = self.config["effects_level"] == "light"
+        self.backdrop.set_reduced(reduced); self.scan_core.set_reduced(reduced)
+        self._apply_theme()
 
     def _save_settings(self) -> None:
         self._save_settings_silent()
         QMessageBox.information(self, "保存成功", "设置已保存。视觉特效设置已立即生效。")
 
-    def _check_update(self) -> None:
+    def _apply_theme(self) -> None:
+        theme_id = self.config.get("theme_id", "obsidian")
+        self.setStyleSheet(apply_theme(theme_id, self.config.get("font_scale", "standard")))
+        if hasattr(self, "backdrop"): self.backdrop.set_theme(theme_id)
+        if hasattr(self, "scan_core"): self.scan_core.set_theme(theme_id)
+
+    def _preview_theme(self, _index: int = -1) -> None:
+        if not hasattr(self, "theme_select"): return
+        self.config["theme_id"] = self.theme_select.currentData(); self.config["font_scale"] = self.font_select.currentData()
+        self._apply_theme()
+
+    def _reset_settings(self) -> None:
+        preserved = {key: self.config.get(key) for key in ("device_id", "device_token", "api_base", "target_host")}
+        self.config.update(DEFAULT_CONFIG); self.config.update({key: value for key, value in preserved.items() if value})
+        save_config(self.config)
+        QMessageBox.information(self, "已恢复推荐设置", "推荐设置已恢复，重新打开本页即可看到全部选项。")
+
+    def _open_report_dir(self) -> None:
+        REPORT_DIR.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(REPORT_DIR)))
+
+    def _cleanup_local_reports(self) -> None:
+        days = int(self.retention_select.currentData())
+        removed = cleanup_reports(days)
+        self._refresh_history()
+        QMessageBox.information(self, "清理完成", "永久保留模式未删除报告。" if days <= 0 else f"已清理 {removed} 份过期报告。")
+
+    def _export_diagnostics(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(self, "导出售后诊断包", str(Path.home() / f"TK诊断包-{datetime.now():%Y%m%d-%H%M}.zip"), "ZIP 文件 (*.zip)")
+        if not path: return
+        safe_config = {key: value for key, value in self.config.items() if key not in {"device_token"}}
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("config-sanitized.json", json.dumps(safe_config, ensure_ascii=False, indent=2))
+            log = DATA_DIR / "client.log"
+            if log.is_file(): archive.write(log, "client.log")
+            for report in sorted(REPORT_DIR.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True)[:10]: archive.write(report, f"reports/{report.name}")
+        QMessageBox.information(self, "导出完成", "诊断包已生成，可发送给技术支持。")
+
+    def _copy_device_id(self) -> None:
+        QApplication.clipboard().setText(self.config.get("device_id", ""))
+        QMessageBox.information(self, "已复制", "设备编号已复制到剪贴板。")
+
+    def _show_changelog(self) -> None:
+        try:
+            rows = ClientApi(self.config["api_base"], self.config.get("device_token", "")).changelog().get("releases", [])
+            text = "\n\n".join(f"V{row.get('version')} · {row.get('title','')}\n{row.get('details') or row.get('notes','')}" for row in rows[:10]) or "暂无版本记录"
+            QMessageBox.information(self, "版本更新记录", text)
+        except ApiError as exc:
+            QMessageBox.warning(self, "获取失败", str(exc))
+
+    def _check_update(self, _checked: bool = False, silent: bool = False) -> None:
         try:
             data = ClientApi(self.config["api_base"], self.config.get("device_token", "")).update_info()
             if not data.get("available") or data.get("version") == APP_VERSION:
-                QMessageBox.information(self, "版本检查", "当前已经是可用版本。")
+                if not silent:
+                    QMessageBox.information(self, "版本检查", "当前已经是可用版本。")
                 return
             if QMessageBox.question(self, "发现新版本", f"V{data['version']} · {data.get('title','')}\n\n{data.get('notes','')}\n\n是否立即下载并安装？") != QMessageBox.Yes:
                 return
@@ -1073,7 +1178,10 @@ class MainWindow(FramelessWindow):
             self.update_worker.failed.connect(self.update_thread.quit)
             self.update_thread.start()
         except ApiError as exc:
-            QMessageBox.warning(self, "检查失败", str(exc))
+            if silent:
+                self.logger.info("startup_update_check_failed %s", exc)
+            else:
+                QMessageBox.warning(self, "检查失败", str(exc))
 
     def _update_ready(self, path) -> None:
         try:

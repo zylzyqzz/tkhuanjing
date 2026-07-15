@@ -1,10 +1,28 @@
+THEMES = {
+    "obsidian": {
+        "name": "黑曜石旗舰", "bg": "#050A12", "surface": "#091321", "surface2": "#0D1A2B", "line": "#1C3554",
+        "text": "#EAF3FF", "muted": "#7E93AF", "blue": "#4DAAFF", "cyan": "#4FE6D2", "gold": "#E9A84B",
+        "pass": "#4EE0A1", "warning": "#F2B45F", "fail": "#FF6075", "unknown": "#8798AE",
+    },
+    "cyber": {
+        "name": "赛博蓝", "bg": "#070615", "surface": "#11102A", "surface2": "#17143A", "line": "#3B3478",
+        "text": "#F4F0FF", "muted": "#9A91BD", "blue": "#7A74FF", "cyan": "#38D9FF", "gold": "#F4A65D",
+        "pass": "#42E7B0", "warning": "#FFC266", "fail": "#FF5F8F", "unknown": "#938DA8",
+    },
+    "daylight": {
+        "name": "极昼浅色", "bg": "#EAF1F8", "surface": "#FFFFFF", "surface2": "#F4F8FC", "line": "#B8C9DA",
+        "text": "#15263A", "muted": "#60758B", "blue": "#1677D2", "cyan": "#159EAD", "gold": "#B97416",
+        "pass": "#178A61", "warning": "#A9670B", "fail": "#C93652", "unknown": "#6C7C8F",
+    },
+}
+
 COLORS = {
     "bg": "#050A12", "surface": "#091321", "surface2": "#0D1A2B", "line": "#1C3554",
     "text": "#EAF3FF", "muted": "#7E93AF", "blue": "#4DAAFF", "cyan": "#4FE6D2",
     "gold": "#E9A84B", "pass": "#4EE0A1", "warning": "#F2B45F", "fail": "#FF6075", "unknown": "#8798AE",
 }
 
-STYLESHEET = r"""
+BASE_STYLESHEET = r"""
 * { font-family: "Noto Sans SC", "Microsoft YaHei UI"; font-size: 13px; color: #DDE9F8; }
 QMainWindow { background: transparent; }
 QWidget#windowChrome { background: #050A12; border: 1px solid rgba(94,153,222,.34); border-radius: 18px; }
@@ -73,3 +91,35 @@ QHeaderView::section { background: #10243B; color: #8299B6; border: 0; padding: 
 QTableWidget::item { padding: 8px; border-bottom: 1px solid rgba(71,121,180,.12); }
 QTableWidget::item:selected { background: #1E5A91; }
 """
+
+LIGHT_OVERRIDE = r"""
+QWidget#windowChrome { background: #EAF1F8; border-color: #AFC3D7; }
+QFrame#titleBar, QFrame#sidebar { background: #F7FAFD; border-color: #C8D6E4; }
+QFrame[card="true"], QFrame[metricCard="true"], QFrame[moduleTile="true"], QFrame[modeCard="true"], QFrame[problemCard="true"] { background: #FFFFFF; border-color: #C5D5E4; }
+QTextEdit#terminal, QComboBox, QLineEdit, QTextEdit, QSpinBox { background: #F7FAFD; color: #183047; border-color: #B9CBDB; }
+QComboBox QAbstractItemView, QDialog { background: #FFFFFF; color: #183047; }
+QTableWidget { background: #FFFFFF; alternate-background-color: #F5F8FB; color: #1E3449; border-color: #C2D2E1; }
+QHeaderView::section { background: #E5EEF6; color: #526C83; }
+QPushButton { color: #23415D; background: #E7F0F8; border-color: #B7CADB; }
+QLabel#modeTitle, QLabel#pageTitle, QLabel[heading="true"], QLabel[subheading="true"], QLabel#metricValue, QLabel#windowTitle { color: #142A40; }
+QCheckBox { color: #263E55; }
+QScrollBar:vertical { background: #E7EEF5; } QScrollBar::handle:vertical { background: #A8BED1; }
+"""
+
+
+def apply_theme(theme_id: str = "obsidian", font_scale: str = "standard") -> str:
+    selected = THEMES.get(theme_id, THEMES["obsidian"])
+    defaults = THEMES["obsidian"]
+    COLORS.clear(); COLORS.update({key: value for key, value in selected.items() if key != "name"})
+    style = BASE_STYLESHEET
+    for key in ("bg", "surface", "surface2", "line", "text", "muted", "blue", "cyan", "gold", "pass", "warning", "fail", "unknown"):
+        style = style.replace(defaults[key], selected[key]).replace(defaults[key].lower(), selected[key])
+    if theme_id == "daylight":
+        style += LIGHT_OVERRIDE
+    style += f"\n/* active-theme:{theme_id} */ QWidget#windowChrome {{ background-color: {selected['bg']}; }} QLabel#pageEyebrow {{ color: {selected['blue']}; }}"
+    if font_scale == "large":
+        style += "\n* { font-size: 14px; } QLabel#pageTitle { font-size: 29px; } QLabel#metricValue { font-size: 26px; }"
+    return style
+
+
+STYLESHEET = apply_theme()

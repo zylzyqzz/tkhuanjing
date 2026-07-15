@@ -33,10 +33,17 @@ DEFAULT_PROFILE = {
 DEFAULT_SETTINGS = {
     "product_name": "维度 TikTok 直播开播助手",
     "product_intro": "面向 TikTok 电脑直播公司和工作室的开播前技术准备度检测工具。",
-    "product_features": "网络稳定性检查\n电脑性能检查\n摄像头与麦克风检查\n直播软件准备检查\n检查报告与技术支持",
+    "product_features": "IP 与目标地区\n网络质量与真实测速\nWindows 直播环境\n电脑性能与后台占用\nGPU 与硬件编码器\n直播设备与插件\n直播软件与客户端完整性",
     "product_faq": "检测通过仅代表电脑、网络、设备和直播软件已达到技术准备条件。",
     "support_text": "遇到问题请通过软件内客服二维码联系技术支持。",
     "latest_changelog": "V2 产品级客户端与管理平台升级。",
+    "home_hero_title": "开播前，先检查",
+    "home_hero_subtitle": "让每一次 TikTok 电脑直播，从准备充分开始。",
+    "home_daily_text": "日常开播前只读检测网络、电脑、设备与直播软件，不修改电脑环境。",
+    "home_setup_text": "新设备、更换网络或环境异常时使用，确认后配置并自动复检。",
+    "home_steps": "发现真实问题\n判断问题来源\n安全处理或给出方案\n自动复检\n判断能否开播",
+    "home_system_requirements": "Windows 10 / Windows 11 · 1366×768 及以上 · 建议使用有线网络",
+    "home_extra_notice": "检测结果用于判断技术准备度，请结合实际直播要求使用。",
 }
 
 
@@ -48,6 +55,9 @@ def seed_defaults(db: Session) -> None:
     for key, value in DEFAULT_SETTINGS.items():
         if not db.get(Setting, key):
             db.add(Setting(key=key, value=value))
+    feature_setting = db.get(Setting, "product_features")
+    if feature_setting and len([line for line in feature_setting.value.splitlines() if line.strip()]) != 7:
+        feature_setting.value = DEFAULT_SETTINGS["product_features"]
     if not db.scalar(select(CheckProfile).where(CheckProfile.active.is_(True))):
         db.add(CheckProfile(name=DEFAULT_PROFILE["profile_name"], region="*", bitrate_kbps=6000, rules_json=json.dumps(DEFAULT_PROFILE, ensure_ascii=False), active=True, created_at=now_iso(), updated_at=now_iso()))
     db.commit()

@@ -40,6 +40,7 @@ class CheckContext:
     cancelled: threading.Event
     event_sink: EventSink | None = None
     paused: threading.Event | None = None
+    test_mode: str = "standard"
 
 
 @dataclass(slots=True)
@@ -75,7 +76,17 @@ def ping_metrics(host: str, count: int = 8) -> tuple[float, float, float, int]:
     return latency, loss, jitter, len(times)
 
 
-def _result(check_id: str, category: str, status: Status, title: str, value: str, *, evidence: list[str], diagnosis: str, impact: str, solutions: list[str] | None = None, metrics: dict | None = None, source: str = "本机实测", confidence: str = "high", repair_id: str = "", repair_level: str = "manual", verify: list[str] | None = None) -> CheckResult:
+def _priority(check_id: str, status: Status) -> str:
+    if check_id in {"network.throughput", "devices.camera", "devices.microphone", "performance.encoder", "streaming.configuration"}:
+        return "BLOCKING"
+    if check_id.startswith(("network.public_ip", "network.ip_quality", "network.target_route", "system.timezone", "system.region_consistency")):
+        return "ADVISORY"
+    if check_id in {"client.service", "environment.security_services", "environment.tiktok_processes"}:
+        return "INFORMATIONAL"
+    return "HIGH_RISK" if status in {Status.FAIL, Status.WARNING} else "INFORMATIONAL"
+
+
+def _result(check_id: str, category: str, status: Status, title: str, value: str, *, evidence: list[str], diagnosis: str, impact: str, solutions: list[str] | None = None, metrics: dict | None = None, source: str = "本机实测", confidence: str = "high", repair_id: str = "", repair_level: str = "manual", verify: list[str] | None = None, priority: str = "") -> CheckResult:
     solutions = solutions or []
     return CheckResult(
         check_id=check_id, category=category, status=status, title=title, value=value,
@@ -83,6 +94,7 @@ def _result(check_id: str, category: str, status: Status, title: str, value: str
         repair_level=repair_level, evidence=evidence, metrics=metrics or {}, diagnosis=diagnosis,
         impact=impact, solutions=solutions, data_source=source, confidence=confidence,
         verification_check_ids=verify or [check_id],
+        priority=priority or _priority(check_id, status),
     )
 
 
@@ -162,11 +174,11 @@ def network_checks(ctx: CheckContext) -> list[CheckResult]:
         emit(ctx.event_sink, "metric_sampled", "network", f"{label}速度采样 {index}/{total}{suffix}", level=level, progress=18 + index * 3)
 
     try:
-        speed = measure_throughput(progress=speed_progress)
+        samples = {"quick": 2, "standard": 3, "deep": 5}.get(ctx.test_mode, 3)
+        sample_bytes = {"quick": 1_000_000, "standard": 2_000_000, "deep": 3_000_000}.get(ctx.test_mode, 2_000_000)
+        speed = measure_throughput(samples=samples, sample_bytes=sample_bytes, progress=speed_progress)
     except TypeError as exc:
         # Keep compatibility with older provider adapters and test doubles.
-        if "progress" not in str(exc):
-            raise
         speed = measure_throughput()
     upload = speed.get("upload_mbps")
     download = speed.get("download_mbps")
@@ -256,6 +268,14 @@ def system_checks(ctx: CheckContext) -> list[CheckResult]:
     except Exception as exc:
         rows.append(_result("system.power", "系统环境", Status.UNKNOWN, "电源模式", "未读取", evidence=[str(exc)], diagnosis="无法读取电源模式", impact="无法确认持续性能策略。"))
     try:
+        sleep = powershell("powercfg /query SCHEME_CURRENT SUB_SLEEP STANDBYIDLE")
+        values = re.findall(r"0x([0-9a-fA-F]+)", sleep)
+        ac_seconds = int(values[-1], 16) if values else -1
+        disabled = ac_seconds == 0
+        rows.append(_result("system.sleep", "系统环境", Status.PASS if disabled else Status.WARNING if ac_seconds > 0 else Status.UNKNOWN, "接通电源睡眠策略", "已关闭" if disabled else f"{ac_seconds // 60} 分钟" if ac_seconds > 0 else "未读取", evidence=["直播期间建议接通电源且不自动睡眠"], diagnosis="长时间直播不会因系统睡眠中断" if disabled else "电脑可能在直播期间进入睡眠", impact="睡眠会直接中断推流、采集和网络连接。", solutions=[] if disabled else ["确认后关闭接通电源时的睡眠和休眠"], repair_id="disable_sleep" if ac_seconds > 0 else "", repair_level="confirm"))
+    except Exception as exc:
+        rows.append(_result("system.sleep", "系统环境", Status.UNKNOWN, "接通电源睡眠策略", "未读取", evidence=[str(exc)], diagnosis="无法读取睡眠策略", impact="请在 Windows 电源设置中人工确认。"))
+    try:
         status = powershell("(Get-Service W32Time).Status")
         running = status.lower() == "running"
         rows.append(_result("system.time_sync", "系统环境", Status.PASS if running else Status.WARNING, "Windows 时间同步", status, evidence=[f"W32Time 服务：{status}"], diagnosis="时间同步服务运行正常" if running else "时间同步服务未运行", impact="系统时间偏差可能造成连接证书或登录验证异常。", solutions=[] if running else ["启动时间服务并立即同步"], repair_id="sync_time" if not running else "", repair_level="safe"))
@@ -302,11 +322,13 @@ def system_checks(ctx: CheckContext) -> list[CheckResult]:
 
 
 def client_checks(ctx: CheckContext) -> list[CheckResult]:
+    from .storage import CONFIG_FILE
     required = ["收款码.jpg", "客服二维码.png", "app_icon.ico"]
     missing = [name for name in required if not (ctx.resource_dir / name).is_file()]
     return [
         _result("client.assets", "客户端", Status.FAIL if missing else Status.PASS, "离线资源完整性", "缺少：" + "、".join(missing) if missing else "完整", evidence=["收款码、客服二维码和产品图标均随安装包部署" if not missing else f"缺少 {len(missing)} 个资源"], diagnosis="客户端资源完整" if not missing else "安装目录资源缺失", impact="资源缺失会造成支付或客服二维码无法显示。", solutions=[] if not missing else ["使用正式安装包覆盖安装"]),
-        _result("client.service", "客户端", Status.PASS if ctx.api_online else Status.WARNING, "本地管理服务", "在线" if ctx.api_online else "离线", evidence=[ctx.api.base_url], diagnosis="可以读取规则和上传报告" if ctx.api_online else "管理服务离线，本地检查仍可继续", impact="离线时无法激活、同步报告或检查更新。", solutions=[] if ctx.api_online else ["需要同步时启动本地管理后台"]),
+        _result("client.service", "客户端", Status.PASS if ctx.api_online else Status.WARNING, "产品服务连接", "在线" if ctx.api_online else "离线", evidence=["授权、规则、报告和更新服务连接状态"], diagnosis="可以读取规则和同步产品数据" if ctx.api_online else "产品服务暂时不可用，本地检查仍可继续", impact="离线时无法激活、同步报告或检查更新。", solutions=[] if ctx.api_online else ["检查网络后重试；本地检测和历史报告仍可使用"]),
+        _result("client.configuration", "客户端", Status.PASS if CONFIG_FILE.is_file() else Status.WARNING, "客户端配置文件", "完整" if CONFIG_FILE.is_file() else "缺失", evidence=[str(CONFIG_FILE)], diagnosis="客户端配置可正常读取" if CONFIG_FILE.is_file() else "配置文件缺失或尚未生成", impact="配置缺失会造成目标地区、主题和检测偏好无法保存。", solutions=[] if CONFIG_FILE.is_file() else ["重新生成安全默认配置"], repair_id="repair_client_config" if not CONFIG_FILE.is_file() else "", repair_level="safe"),
     ]
 
 
@@ -382,6 +404,13 @@ def run_repair(repair_id: str, *, target_timezone: str = "") -> tuple[bool, str,
             uri = "ms-settings:privacy-webcam" if repair_id == "open_camera_settings" else "ms-settings:privacy-microphone"
             os.startfile(uri)  # type: ignore[attr-defined]
             return True, "已打开 Windows 权限设置，请开启权限后复检", {"uri": uri}
+        if repair_id == "open_sound_settings":
+            os.startfile("ms-settings:sound")  # type: ignore[attr-defined]
+            return True, "已打开 Windows 声音设备设置", {"uri": "ms-settings:sound"}
+        if repair_id == "repair_client_config":
+            from .storage import load_config, save_config
+            value = load_config(); save_config(value)
+            return True, "客户端安全默认配置已重新生成", {"config_schema": value.get("schema_version")}
         return False, "该项目不支持自动修复，请按卡片步骤人工处理", {}
     except Exception as exc:
         return False, str(exc), {}

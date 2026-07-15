@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..database import get_db
-from ..models import Admin, AuditLog, CheckItem, CheckProfile, CheckReport, Code, Customer, Device, LiveRoom, Release, Setting, SupportCase, now_iso
+from ..models import Admin, AuditLog, CheckItem, CheckProfile, CheckReport, Code, Customer, Device, DownloadStat, LiveRoom, Release, Setting, SupportCase, now_iso
 from ..schemas import CodeGenerateRequest, CodeStatusRequest, CustomerIn, DeviceIn, LoginRequest, ProfileIn, ReleaseActivateIn, RoomIn, SettingsIn, SupportIn
 from ..security import clear_login_attempts, current_admin, make_session, rate_limit_login, request_ip, require_csrf, verify_password
 from ..services import audit, create_codes, file_sha256
@@ -64,6 +64,8 @@ def stats(_admin: dict = Depends(current_admin), db: Session = Depends(get_db)) 
     repairable = db.scalar(select(func.count()).select_from(CheckItem).where(CheckItem.repairable.is_(True))) or 0
     run_modes = dict(db.execute(select(CheckReport.run_mode, func.count()).group_by(CheckReport.run_mode)).all())
     active = db.scalar(select(Release).where(Release.active.is_(True), Release.channel == "stable"))
+    downloads_today = db.scalar(select(func.sum(DownloadStat.count)).where(DownloadStat.day == today)) or 0
+    readiness = dict(db.execute(select(CheckReport.readiness_level, func.count()).where(CheckReport.checked_at.startswith(today)).group_by(CheckReport.readiness_level)).all())
     return {
         "customers": db.scalar(select(func.count()).select_from(Customer)) or 0,
         "rooms": db.scalar(select(func.count()).select_from(LiveRoom)) or 0,
@@ -77,6 +79,7 @@ def stats(_admin: dict = Depends(current_admin), db: Session = Depends(get_db)) 
         "repairable_findings": repairable,
         "run_modes": run_modes,
         "active_release": None if not active else row_dict(active, ["version", "title", "notes"]),
+        "downloads_today": downloads_today, "readiness": readiness,
     }
 
 
@@ -147,10 +150,13 @@ def save_device(payload: DeviceIn, admin: dict = Depends(require_csrf), db: Sess
 def reports(status: str = "", q: str = "", limit: int = Query(200, ge=1, le=1000), _admin: dict = Depends(current_admin), db: Session = Depends(get_db)) -> dict:
     stmt = select(CheckReport).order_by(CheckReport.checked_at.desc())
     if status:
-        stmt = stmt.where(CheckReport.overall_status == status)
+        if status in {"READY", "READY_WITH_RISK", "NOT_READY", "INCOMPLETE"}:
+            stmt = stmt.where(CheckReport.readiness_level == status)
+        else:
+            stmt = stmt.where(CheckReport.overall_status == status)
     if q:
         stmt = stmt.where(or_(CheckReport.target_region_id.contains(q), CheckReport.device_id.contains(q)))
-    fields = ["report_id", "device_id", "run_mode", "target_region_id", "schema_version", "app_version", "checked_at", "overall_status", "conclusion", "uploaded_at"]
+    fields = ["report_id", "device_id", "run_mode", "target_region_id", "schema_version", "app_version", "checked_at", "overall_status", "conclusion", "readiness_level", "blocking_count", "high_risk_count", "test_mode", "uploaded_at"]
     return {"reports": [row_dict(x, fields) for x in db.scalars(stmt.limit(limit)).all()]}
 
 
@@ -159,14 +165,15 @@ def report(report_id: str, _admin: dict = Depends(current_admin), db: Session = 
     row = db.get(CheckReport, report_id)
     if not row:
         raise HTTPException(404, "报告不存在")
-    fields = ["report_id", "device_id", "run_mode", "target_region_id", "schema_version", "app_version", "checked_at", "overall_status", "conclusion"]
-    item_fields = ["check_id", "category", "status", "title", "value", "reason", "action", "repairable", "diagnosis", "impact", "data_source", "confidence", "repair_id", "repair_level", "duration_ms", "error_code"]
+    fields = ["report_id", "device_id", "run_mode", "target_region_id", "schema_version", "app_version", "checked_at", "overall_status", "conclusion", "readiness_level", "blocking_count", "high_risk_count", "test_mode"]
+    item_fields = ["check_id", "category", "status", "title", "value", "reason", "action", "repairable", "diagnosis", "impact", "data_source", "confidence", "repair_id", "repair_level", "duration_ms", "error_code", "priority", "blocking"]
     items = []
     for item in row.items:
         value = row_dict(item, item_fields)
         value.update({
             "evidence": json.loads(item.evidence_json or "[]"), "metrics": json.loads(item.metrics_json or "{}"),
             "solutions": json.loads(item.solutions_json or "[]"), "verification_check_ids": json.loads(item.verification_json or "[]"),
+            "repair_outcome": json.loads(item.repair_outcome_json or "{}"),
         })
         items.append(value)
     return {"report": row_dict(row, fields) | {
@@ -179,13 +186,15 @@ def report(report_id: str, _admin: dict = Depends(current_admin), db: Session = 
         "before_snapshot": json.loads(row.before_snapshot_json or "{}"),
         "after_snapshot": json.loads(row.after_snapshot_json or "{}"),
         "confidence_summary": json.loads(row.confidence_summary_json or "{}"),
+        "baseline_delta": json.loads(row.baseline_delta_json or "{}"),
+        "source_health": json.loads(row.source_health_json or "{}"),
     }, "items": items}
 
 
 @router.get("/setup-reports")
 def setup_reports(limit: int = Query(200, ge=1, le=1000), _admin: dict = Depends(current_admin), db: Session = Depends(get_db)) -> dict:
     rows = db.scalars(select(CheckReport).where(CheckReport.run_mode == "environment_setup").order_by(CheckReport.checked_at.desc()).limit(limit)).all()
-    fields = ["report_id", "device_id", "run_mode", "target_region_id", "schema_version", "app_version", "checked_at", "overall_status", "conclusion", "uploaded_at"]
+    fields = ["report_id", "device_id", "run_mode", "target_region_id", "schema_version", "app_version", "checked_at", "overall_status", "conclusion", "readiness_level", "blocking_count", "high_risk_count", "test_mode", "uploaded_at"]
     return {"reports": [row_dict(row, fields) for row in rows]}
 
 
@@ -256,6 +265,35 @@ def save_settings(payload: SettingsIn, admin: dict = Depends(require_csrf), db: 
     return {"ok": True}
 
 
+@router.get("/homepage")
+def homepage_settings(_admin: dict = Depends(current_admin), db: Session = Depends(get_db)) -> dict:
+    keys = {"product_name", "product_intro", "product_features", "product_faq", "support_text", "latest_changelog", "home_hero_title", "home_hero_subtitle", "home_daily_text", "home_setup_text", "home_steps", "home_system_requirements", "home_extra_notice"}
+    return {row.key: row.value for row in db.scalars(select(Setting).where(Setting.key.in_(keys))).all()}
+
+
+@router.post("/homepage")
+def save_homepage(payload: SettingsIn, admin: dict = Depends(require_csrf), db: Session = Depends(get_db)) -> dict:
+    allowed = {"product_name", "product_intro", "product_features", "product_faq", "support_text", "latest_changelog", "home_hero_title", "home_hero_subtitle", "home_daily_text", "home_setup_text", "home_steps", "home_system_requirements", "home_extra_notice"}
+    if not payload.values or not set(payload.values).issubset(allowed):
+        raise HTTPException(422, "主页资料字段不正确")
+    if not payload.values.get("home_hero_title", "").strip() or not payload.values.get("product_name", "").strip():
+        raise HTTPException(422, "产品名称和主页标题不能为空")
+    if "product_features" in payload.values and len([line for line in payload.values["product_features"].splitlines() if line.strip()]) != 7:
+        raise HTTPException(422, "检测能力必须填写 7 项，每行一项")
+    for key, value in payload.values.items():
+        row = db.get(Setting, key)
+        if row: row.value = value.strip()
+        else: db.add(Setting(key=key, value=value.strip()))
+    audit(db, admin["username"], "save_homepage", "settings"); db.commit()
+    return {"ok": True}
+
+
+@router.get("/download-stats")
+def download_stats(_admin: dict = Depends(current_admin), db: Session = Depends(get_db)) -> dict:
+    rows = db.scalars(select(DownloadStat).order_by(DownloadStat.day.desc(), DownloadStat.version.desc()).limit(180)).all()
+    return {"stats": [row_dict(row, ["day", "version", "count", "updated_at"]) for row in rows]}
+
+
 @router.get("/profile")
 def get_profile(_admin: dict = Depends(current_admin), db: Session = Depends(get_db)) -> dict:
     row = db.scalar(select(CheckProfile).where(CheckProfile.active.is_(True)).order_by(CheckProfile.id.desc()))
@@ -303,6 +341,8 @@ async def publish_release(
 ) -> dict:
     if not version.strip() or not title.strip() or not details.strip():
         raise HTTPException(422, "版本号、标题和详细内容不能为空")
+    if channel not in {"stable", "beta"}:
+        raise HTTPException(422, "发布通道不正确")
     if not file.filename or Path(file.filename).suffix.lower() != ".exe":
         raise HTTPException(415, "只允许上传 EXE 安装程序")
     safe_name = f"client-{version.strip()}.exe"
@@ -315,12 +355,15 @@ async def publish_release(
                 output.close(); target.unlink(missing_ok=True); raise HTTPException(413, "安装包超过大小限制")
             output.write(chunk)
     digest = file_sha256(target)
-    db.execute(Release.__table__.update().where(Release.channel == channel).values(active=False))
+    with target.open("rb") as stream:
+        valid_exe = stream.read(2) == b"MZ"
+    if not valid_exe:
+        target.unlink(missing_ok=True); raise HTTPException(415, "文件不是有效的 Windows EXE 安装程序")
     row = db.get(Release, version) or Release(version=version, filename=safe_name, sha256=digest)
     row.filename = row.installer_filename = safe_name; row.sha256 = digest; row.file_size = size
-    row.title = title; row.notes = notes; row.details = details; row.channel = channel; row.mandatory = mandatory; row.minimum_version = minimum_version; row.active = True
+    row.title = title; row.notes = notes; row.details = details; row.channel = channel; row.mandatory = mandatory; row.minimum_version = minimum_version; row.active = False
     db.add(row); audit(db, admin["username"], "publish_release", "release", version, digest); db.commit()
-    return {"ok": True, "version": version, "sha256": digest, "file_size": size}
+    return {"ok": True, "version": version, "sha256": digest, "file_size": size, "status": "pending"}
 
 
 @router.get("/releases")
@@ -333,5 +376,9 @@ def releases(_admin: dict = Depends(current_admin), db: Session = Depends(get_db
 def activate_release(payload: ReleaseActivateIn, admin: dict = Depends(require_csrf), db: Session = Depends(get_db)) -> dict:
     row = db.get(Release, payload.version)
     if not row: raise HTTPException(404, "版本不存在")
-    db.execute(Release.__table__.update().where(Release.channel == row.channel).values(active=False)); row.active = True
+    filename = row.installer_filename or row.filename
+    target = settings.downloads_dir / Path(filename).name
+    if not target.is_file() or target.stat().st_size != row.file_size or file_sha256(target) != row.sha256:
+        raise HTTPException(409, "安装包缺失、大小不符或哈希校验失败，禁止发布")
+    db.execute(Release.__table__.update().where(Release.channel == row.channel, Release.version != row.version).values(active=False)); row.active = True
     audit(db, admin["username"], "activate_release", "release", row.version, row.channel); db.commit(); return {"ok": True}

@@ -30,6 +30,9 @@ REQUIRED_COLUMNS = {
         "device_snapshot_json text default '{}'", "check_logs_json text default '[]'",
         "before_snapshot_json text default '{}'", "after_snapshot_json text default '{}'",
         "confidence_summary_json text default '{}'",
+        "readiness_level text default 'INCOMPLETE'", "blocking_count integer default 0",
+        "high_risk_count integer default 0", "test_mode text default 'standard'",
+        "baseline_delta_json text default '{}'", "source_health_json text default '{}'",
     ],
     "check_items": [
         "evidence_json text default '[]'", "metrics_json text default '{}'", "diagnosis text default ''",
@@ -37,6 +40,8 @@ REQUIRED_COLUMNS = {
         "confidence text default 'high'", "repair_id text default ''", "repair_level text default 'manual'",
         "verification_json text default '[]'",
         "duration_ms integer default 0", "error_code text default ''",
+        "priority text default 'INFORMATIONAL'", "blocking integer default 0",
+        "repair_outcome_json text default '{}'",
     ],
 }
 

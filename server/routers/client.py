@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import CheckItem, CheckProfile, CheckReport, Code, Device, LicenseEvent, now_iso
+from ..models import CheckItem, CheckProfile, CheckReport, Code, Device, LicenseEvent, Release, now_iso
 from ..schemas import ActivateRequest, AuthorizeRequest, RegisterRequest, ReportIn
 from ..security import current_device, hash_token
 from ..services import DEFAULT_PROFILE, release_manifest
@@ -127,6 +127,10 @@ def upload_report(payload: ReportIn, device: Device = Depends(current_device), d
         before_snapshot_json=json.dumps(payload.before_snapshot, ensure_ascii=False),
         after_snapshot_json=json.dumps(payload.after_snapshot, ensure_ascii=False),
         confidence_summary_json=json.dumps(payload.confidence_summary, ensure_ascii=False),
+        readiness_level=payload.readiness_level, blocking_count=payload.blocking_count,
+        high_risk_count=payload.high_risk_count, test_mode=payload.test_mode,
+        baseline_delta_json=json.dumps(payload.baseline_delta, ensure_ascii=False),
+        source_health_json=json.dumps(payload.source_health, ensure_ascii=False),
     )
     report.items = [CheckItem(
         check_id=item.check_id, category=item.category, status=item.status, title=item.title,
@@ -137,6 +141,8 @@ def upload_report(payload: ReportIn, device: Device = Depends(current_device), d
         data_source=item.data_source, confidence=item.confidence, repair_id=item.repair_id,
         repair_level=item.repair_level, verification_json=json.dumps(item.verification_check_ids, ensure_ascii=False),
         duration_ms=item.duration_ms, error_code=item.error_code,
+        priority=item.priority, blocking=item.blocking,
+        repair_outcome_json=json.dumps(item.repair_outcome, ensure_ascii=False),
     ) for item in payload.items]
     db.add(report)
     device.last_seen = now_iso()
@@ -156,6 +162,12 @@ def latest_report(device: Device = Depends(current_device), db: Session = Depend
 @router.get("/update")
 def update(channel: str = "stable", db: Session = Depends(get_db)) -> dict:
     return release_manifest(db, channel)
+
+
+@router.get("/changelog")
+def changelog(db: Session = Depends(get_db)) -> dict:
+    rows = db.scalars(select(Release).order_by(Release.created_at.desc()).limit(20)).all()
+    return {"releases": [{"version": row.version, "title": row.title, "notes": row.notes, "details": row.details, "channel": row.channel, "created_at": row.created_at} for row in rows]}
 
 
 @router.get("/regions")
