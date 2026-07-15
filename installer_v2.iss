@@ -1,5 +1,5 @@
 #define MyAppName "维度 TikTok 直播开播助手"
-#define MyAppVersion "2.0.0"
+#define MyAppVersion "2.8.1"
 #define MyAppExeName "TKLiveCheck.exe"
 
 [Setup]
@@ -11,8 +11,8 @@ DefaultDirName={localappdata}\Programs\WeiDuTKLiveCheck
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
-OutputDir=dist_setup
-OutputBaseFilename=维度TikTok直播开播助手安装程序-2.0.0
+OutputDir=..\dist
+OutputBaseFilename=VD开播助手
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
