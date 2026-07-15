@@ -135,7 +135,7 @@ class CheckWorker(QObject):
             report.test_mode = self.config.get("test_mode", "standard")
             current = report.to_dict()
             previous = next((row for row in load_reports(10) if row.get("run_mode") == self.run_mode), None)
-            report.baseline_delta = baseline_delta(current, previous)
+            report.baseline_delta = baseline_delta(current, previous) if self.config.get("auto_compare_reports", True) else {"available": False}
             self.completed.emit(report, self.config, license_data)
         except Exception as exc:
             self.failed.emit(str(exc))
@@ -299,7 +299,7 @@ class ActivationDialog(QDialog):
 
 
 class MainWindow(FramelessWindow):
-    PAGE_NAMES = ["开播中心", "检测过程", "检测报告", "问题处理", "网络详情", "历史记录", "授权服务", "设置与关于"]
+    PAGE_NAMES = ["开播中心", "检测过程", "检测报告", "问题处理", "网络报告", "历史记录", "授权服务", "系统设置", "关于产品"]
 
     def __init__(self) -> None:
         super().__init__()
@@ -319,7 +319,8 @@ class MainWindow(FramelessWindow):
         self._apply_theme()
         self._refresh_history()
         self._update_license_label()
-        self._show_page(0)
+        start_page = int(self.config.get("last_page", 0)) if self.config.get("remember_last_page") else {"home": 0, "network": 4, "history": 5}.get(self.config.get("startup_page", "home"), 0)
+        self._show_page(start_page if 0 <= start_page < len(self.PAGE_NAMES) else 0)
         if self.config.get("update_check_on_start", True):
             QTimer.singleShot(1800, lambda: self._check_update(silent=True))
 
@@ -342,13 +343,13 @@ class MainWindow(FramelessWindow):
         side = QVBoxLayout(sidebar)
         side.setContentsMargins(12, 12, 12, 15)
         side.setSpacing(7)
-        brand = QLabel("WD  LIVE CORE")
+        brand = QLabel("JC  LIVE CORE")
         brand.setObjectName("sideBrand")
         brand.setAlignment(Qt.AlignCenter)
         side.addWidget(brand)
         self.nav_group = QButtonGroup(self)
         self.nav_group.setExclusive(True)
-        icons = ["01", "02", "03", "04", "05", "06", "07", "08"]
+        icons = ["01", "02", "03", "04", "05", "06", "07", "08", "09"]
         for index, (icon, name) in enumerate(zip(icons, self.PAGE_NAMES)):
             button = QPushButton(f"{icon}   {name}")
             button.setCheckable(True)
@@ -369,7 +370,7 @@ class MainWindow(FramelessWindow):
         self.pages = QStackedWidget()
         backdrop_layout.addWidget(self.pages)
         body_layout.addWidget(self.backdrop, 1)
-        for page in (self._home_page(), self._scan_page(), self._report_page(), self._problems_page(), self._network_page(), self._history_page(), self._service_page(), self._settings_page()):
+        for page in (self._home_page(), self._scan_page(), self._report_page(), self._problems_page(), self._network_page(), self._history_page(), self._service_page(), self._settings_page(), self._about_page()):
             self.pages.addWidget(page)
 
     def _shell(self, eyebrow: str, title: str, subtitle: str) -> tuple[QWidget, QVBoxLayout]:
@@ -552,7 +553,7 @@ class MainWindow(FramelessWindow):
         return page
 
     def _network_page(self) -> QWidget:
-        page, layout = self._shell("NETWORK INTELLIGENCE", "网络与目标地区详情", "展示原始采样值、节点、数据来源和可信度；网络线路问题只解释，不承诺软件能够整改。")
+        page, layout = self._shell("NETWORK INTELLIGENCE REPORT", "网络检测分析报告", "单独呈现 IP 注册信息、线路质量、目标地区匹配和原始测速证据；第三方数据缺失不会被当作网络故障。")
         metrics = QHBoxLayout()
         self.network_metrics = {
             "location": MetricCard("IP 归属地", "--"), "isp": MetricCard("ISP / ASN", "--"),
@@ -562,8 +563,29 @@ class MainWindow(FramelessWindow):
         for widget in self.network_metrics.values():
             metrics.addWidget(widget)
         layout.addLayout(metrics)
-        self.network_details = TerminalLog()
-        layout.addWidget(self.network_details, 1)
+        body = QHBoxLayout()
+        identity_card = card(); identity_box = QVBoxLayout(identity_card)
+        identity_title = QLabel("IP 身份与注册信息"); identity_title.setProperty("subheading", True); identity_box.addWidget(identity_title)
+        self.network_identity_table = QTableWidget(0, 2)
+        self.network_identity_table.setHorizontalHeaderLabels(["检测项目", "检测结果"])
+        self.network_identity_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.network_identity_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.network_identity_table.verticalHeader().setVisible(False)
+        self.network_identity_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.network_identity_table.setSelectionMode(QAbstractItemView.NoSelection)
+        identity_box.addWidget(self.network_identity_table, 1)
+        body.addWidget(identity_card, 3)
+        diagnosis_card = card(); diagnosis_box = QVBoxLayout(diagnosis_card)
+        diagnosis_title = QLabel("直播网络分析"); diagnosis_title.setProperty("subheading", True); diagnosis_box.addWidget(diagnosis_title)
+        self.network_details = TerminalLog(); diagnosis_box.addWidget(self.network_details, 1)
+        body.addWidget(diagnosis_card, 4)
+        layout.addLayout(body, 1)
+        actions = QHBoxLayout()
+        self.network_source_label = QLabel("完成一次开播检查后生成网络报告"); self.network_source_label.setProperty("muted", True); actions.addWidget(self.network_source_label)
+        actions.addStretch()
+        export = QPushButton("导出网络报告"); export.clicked.connect(self._export_network_report); actions.addWidget(export)
+        recheck = QPushButton("重新检测网络"); recheck.setProperty("primary", True); recheck.clicked.connect(lambda: self._start_check("daily_preflight")); actions.addWidget(recheck)
+        layout.addLayout(actions)
         return page
 
     def _history_page(self) -> QWidget:
@@ -615,22 +637,27 @@ class MainWindow(FramelessWindow):
         return page
 
     def _settings_page(self) -> QWidget:
-        page, layout = self._shell("PRODUCT CONTROL", "设置与关于", "控制检测体验、主题、报告与更新；服务地址和检测阈值由产品安全维护。")
+        page, layout = self._shell("SYSTEM PREFERENCES", "系统设置", "按您的日常使用习惯定制启动、检测、外观、提示和本地数据；内部服务地址不会暴露在客户端。")
         tabs = QTabWidget(); tabs.setObjectName("settingsTabs")
 
-        general = QWidget(); general_box = QVBoxLayout(general); general_card = card(); form = QVBoxLayout(general_card)
+        general = QWidget(); general.setObjectName("settingsPage"); general_box = QVBoxLayout(general); general_card = card(); form = QVBoxLayout(general_card)
         form.addWidget(QLabel("默认目标地区"))
         self.default_region_setting = QComboBox()
         for item in REGIONS: self.default_region_setting.addItem(item.label, item.region_id)
         self.default_region_setting.setCurrentIndex(max(0, self.default_region_setting.findData(self.config.get("target_region_id"))))
         form.addWidget(self.default_region_setting)
+        form.addWidget(QLabel("启动后默认页面")); self.startup_page_select = QComboBox()
+        for title, value in (("开播中心", "home"), ("网络报告", "network"), ("历史记录", "history")): self.startup_page_select.addItem(title, value)
+        self.startup_page_select.setCurrentIndex(max(0, self.startup_page_select.findData(self.config.get("startup_page", "home")))); form.addWidget(self.startup_page_select)
+        self.remember_last_page = QCheckBox("记住退出前打开的页面"); self.remember_last_page.setChecked(bool(self.config.get("remember_last_page", False))); form.addWidget(self.remember_last_page)
         self.result_sound = QCheckBox("检测完成后播放提示音"); self.result_sound.setChecked(bool(self.config.get("result_sound", True))); form.addWidget(self.result_sound)
         self.auto_open_report = QCheckBox("检测完成后自动打开检测报告"); self.auto_open_report.setChecked(bool(self.config.get("auto_open_report", True))); form.addWidget(self.auto_open_report)
         self.update_on_start = QCheckBox("启动软件时自动检查新版本"); self.update_on_start.setChecked(bool(self.config.get("update_check_on_start", True))); form.addWidget(self.update_on_start)
+        self.show_check_tips = QCheckBox("检测前显示目标地区和预计耗时提示"); self.show_check_tips.setChecked(bool(self.config.get("show_check_tips", True))); form.addWidget(self.show_check_tips)
         reset = QPushButton("恢复推荐设置"); reset.clicked.connect(self._reset_settings); form.addWidget(reset)
         general_box.addWidget(general_card); general_box.addStretch(); tabs.addTab(general, "常规设置")
 
-        appearance = QWidget(); appearance_box = QVBoxLayout(appearance); appearance_card = card(); form = QVBoxLayout(appearance_card)
+        appearance = QWidget(); appearance.setObjectName("settingsPage"); appearance_box = QVBoxLayout(appearance); appearance_card = card(); form = QVBoxLayout(appearance_card)
         form.addWidget(QLabel("产品主题")); self.theme_select = QComboBox()
         for key, value in THEMES.items(): self.theme_select.addItem(value["name"], key)
         self.theme_select.setCurrentIndex(max(0, self.theme_select.findData(self.config.get("theme_id", "obsidian"))))
@@ -643,17 +670,18 @@ class MainWindow(FramelessWindow):
         hint = QLabel("主题切换立即生效；轻量模式会降低粒子、扫描和背景绘制频率。"); hint.setProperty("muted", True); hint.setWordWrap(True); form.addWidget(hint)
         appearance_box.addWidget(appearance_card); appearance_box.addStretch(); tabs.addTab(appearance, "外观与动效")
 
-        detection = QWidget(); detection_box = QVBoxLayout(detection); detection_card = card(); form = QVBoxLayout(detection_card)
+        detection = QWidget(); detection.setObjectName("settingsPage"); detection_box = QVBoxLayout(detection); detection_card = card(); form = QVBoxLayout(detection_card)
         form.addWidget(QLabel("网络检测强度")); self.test_mode_select = QComboBox()
         self.test_mode_select.addItem("快速检测 · 约 1–2 分钟 · 约 6 MB", "quick")
         self.test_mode_select.addItem("标准检测 · 约 2–3 分钟 · 约 12 MB", "standard")
         self.test_mode_select.addItem("深度检测 · 约 4–6 分钟 · 约 30 MB", "deep")
         self.test_mode_select.setCurrentIndex(max(0, self.test_mode_select.findData(self.config.get("test_mode", "standard")))); form.addWidget(self.test_mode_select)
+        self.auto_compare_reports = QCheckBox("检测完成后自动与上一次结果比较"); self.auto_compare_reports.setChecked(bool(self.config.get("auto_compare_reports", True))); form.addWidget(self.auto_compare_reports)
         info = QLabel("七组关键检查始终启用。快速模式适合单项复检，标准模式用于每日开播，深度模式增加上下行采样轮数。检测阈值由管理后台统一下发，避免客户误改标准。")
         info.setWordWrap(True); info.setProperty("muted", True); form.addWidget(info)
         detection_box.addWidget(detection_card); detection_box.addStretch(); tabs.addTab(detection, "检测设置")
 
-        privacy = QWidget(); privacy_box = QVBoxLayout(privacy); privacy_card = card(); form = QVBoxLayout(privacy_card)
+        privacy = QWidget(); privacy.setObjectName("settingsPage"); privacy_box = QVBoxLayout(privacy); privacy_card = card(); form = QVBoxLayout(privacy_card)
         form.addWidget(QLabel(f"本地报告目录\n{REPORT_DIR}"))
         retention_row = QHBoxLayout(); retention_row.addWidget(QLabel("报告保留时间")); self.retention_select = QComboBox()
         for title, days in (("30 天", 30), ("90 天", 90), ("180 天", 180), ("永久保留", 0)): self.retention_select.addItem(title, days)
@@ -666,20 +694,41 @@ class MainWindow(FramelessWindow):
         privacy_note.setWordWrap(True); privacy_note.setProperty("muted", True); form.addWidget(privacy_note)
         privacy_box.addWidget(privacy_card); privacy_box.addStretch(); tabs.addTab(privacy, "数据与隐私")
 
-        about = QWidget(); about_box = QVBoxLayout(about); about_card = card(); form = QVBoxLayout(about_card)
-        heading = QLabel(f"维度 TikTok 直播开播助手  V{APP_VERSION}"); heading.setProperty("heading", True); form.addWidget(heading)
-        for title, text in (("版本通道", "正式版 Stable · Schema V5 检测报告"), ("产品定位", "面向 TikTok／跨境电脑直播的开播前技术准备度检测与环境配置。"), ("隐私边界", "不采集账号密码、Cookie、浏览器数据和个人文件。"), ("责任边界", "不代表平台审核、流量、账号质量或开播权限结果。")):
-            label = QLabel(f"{title}  ·  {text}"); label.setWordWrap(True); label.setProperty("muted", True); form.addWidget(label)
-        about_actions = QHBoxLayout(); update = QPushButton("检查更新"); update.setProperty("primary", True); update.clicked.connect(self._check_update); about_actions.addWidget(update)
-        history = QPushButton("查看版本记录"); history.clicked.connect(self._show_changelog); about_actions.addWidget(history)
-        copy_id = QPushButton("复制设备编号"); copy_id.clicked.connect(self._copy_device_id); about_actions.addWidget(copy_id); form.addLayout(about_actions)
-        qr = QHBoxLayout()
-        for title, filename in (("付款二维码", "收款码.jpg"), ("客服二维码", "客服二维码.png")):
-            pane = QVBoxLayout(); pane.addWidget(QLabel(title)); image = QLabel(); pix = QPixmap(str(resource_dir() / filename)); image.setPixmap(pix.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation)); image.setAlignment(Qt.AlignCenter); pane.addWidget(image); qr.addLayout(pane)
-        form.addLayout(qr); about_box.addWidget(about_card); about_box.addStretch(); tabs.addTab(about, "关于与更新")
-
         layout.addWidget(tabs, 1)
         save = QPushButton("保存全部设置"); save.setProperty("primary", True); save.clicked.connect(self._save_settings); layout.addWidget(save)
+        return page
+
+    def _about_page(self) -> QWidget:
+        page, layout = self._shell("ABOUT JC LIVE CORE", "关于 JC开播助手", "版本、更新、产品边界与售后入口集中在这里，与系统设置完全分离。")
+        hero = card(); hero_box = QHBoxLayout(hero); hero_box.setContentsMargins(26, 22, 26, 22)
+        logo = QLabel(); logo.setPixmap(QPixmap(str(resource_dir() / "app_icon.ico")).scaled(76, 76, Qt.KeepAspectRatio, Qt.SmoothTransformation)); hero_box.addWidget(logo)
+        identity = QVBoxLayout(); name = QLabel(f"JC开播助手  V{APP_VERSION}"); name.setProperty("heading", True); identity.addWidget(name)
+        company = QLabel("维度光年（上海）科技有限责任公司出品"); company.setProperty("subheading", True); identity.addWidget(company)
+        channel = QLabel("正式版 Stable · Windows 10 / 11 · 开播前技术准备度检测"); channel.setProperty("muted", True); identity.addWidget(channel); hero_box.addLayout(identity, 1)
+        update = QPushButton("检测版本更新"); update.setProperty("primary", True); update.clicked.connect(self._check_update); hero_box.addWidget(update)
+        layout.addWidget(hero)
+
+        content = QHBoxLayout()
+        info_card = card(); info = QVBoxLayout(info_card); title = QLabel("产品信息与更新"); title.setProperty("subheading", True); info.addWidget(title)
+        for heading, value in (
+            ("当前版本", f"V{APP_VERSION} · 构建通道 Stable"),
+            ("检测报告", "Schema V5 · 支持网络原始样本与可信度来源"),
+            ("产品定位", "面向 TikTok／跨境电脑直播的开播前检查、环境配置和问题处理。"),
+            ("隐私说明", "不采集账号密码、Cookie、浏览器数据和个人文件；报告需主动确认后上传。"),
+            ("责任边界", "只判断网络、电脑、设备和直播软件的技术准备情况，不代表平台审核、流量或开播权限。"),
+        ):
+            label = QLabel(f"{heading}\n{value}"); label.setWordWrap(True); label.setProperty("muted", True); info.addWidget(label)
+        buttons = QHBoxLayout(); history = QPushButton("查看更新记录"); history.clicked.connect(self._show_changelog); buttons.addWidget(history)
+        copy_id = QPushButton("复制设备编号"); copy_id.clicked.connect(self._copy_device_id); buttons.addWidget(copy_id)
+        verify = QPushButton("检查软件完整性"); verify.clicked.connect(self._show_integrity); buttons.addWidget(verify); info.addLayout(buttons); info.addStretch(); content.addWidget(info_card, 3)
+
+        support_card = card(); support = QVBoxLayout(support_card); support_title = QLabel("授权与客户服务"); support_title.setProperty("subheading", True); support.addWidget(support_title)
+        qr = QHBoxLayout()
+        for title, filename in (("付款二维码", "收款码.jpg"), ("客服二维码", "客服二维码.png")):
+            pane = QVBoxLayout(); label = QLabel(title); label.setAlignment(Qt.AlignCenter); pane.addWidget(label)
+            image = QLabel(); pix = QPixmap(str(resource_dir() / filename)); image.setPixmap(pix.scaled(156, 156, Qt.KeepAspectRatio, Qt.SmoothTransformation)); image.setAlignment(Qt.AlignCenter); pane.addWidget(image); qr.addLayout(pane)
+        support.addLayout(qr); contact = QPushButton("打开授权服务"); contact.setProperty("gold", True); contact.clicked.connect(lambda: self._show_page(6)); support.addWidget(contact); content.addWidget(support_card, 2)
+        layout.addLayout(content, 1)
         return page
 
     def _start_setup(self) -> None:
@@ -722,6 +771,12 @@ class MainWindow(FramelessWindow):
 
     def _start_check(self, run_mode: str = "daily_preflight") -> None:
         self._save_settings_silent()
+        if run_mode == "daily_preflight" and self.config.get("show_check_tips", True):
+            mode = self.config.get("test_mode", "standard")
+            estimate = {"quick": "约 1–2 分钟", "standard": "约 2–3 分钟", "deep": "约 4–6 分钟"}.get(mode, "约 2–3 分钟")
+            region = get_region(self.config.get("target_region_id"))
+            if QMessageBox.question(self, "准备开始开播检查", f"目标地区：{region.label}\n检测强度：{mode.upper()} · {estimate}\n\n本次日常检查只读取状态，不修改电脑环境。是否开始？") != QMessageBox.Yes:
+                return
         self._launch_worker(run_mode, {}, [])
 
     def _launch_worker(self, run_mode: str, snapshot: dict, actions: list[SetupAction]) -> None:
@@ -956,9 +1011,61 @@ class MainWindow(FramelessWindow):
         probes = report.network_snapshot.get("network.target_route", {}).get("target_probes", [])
         values = [probe.get("connect_ms") for probe in probes if probe.get("connect_ms") is not None]
         self.network_metrics["latency"].set_value(str(round(sum(values) / len(values))) if values else "--")
+        rows = [
+            ("IP 地址", ip.get("ip") or "未获取"),
+            ("IP 协议", ip.get("ip_version") or "待确认"),
+            ("地理位置", " ".join(str(ip.get(key) or "") for key in ("country", "region", "city")).strip() or "待确认"),
+            ("经度 / 纬度", f"{ip.get('longitude', '待确认')} / {ip.get('latitude', '待确认')}"),
+            ("ASN", f"AS{ip.get('asn')}" if ip.get("asn") and not str(ip.get("asn")).upper().startswith("AS") else (ip.get("asn") or "待确认")),
+            ("网络服务商 ISP", ip.get("isp") or "待确认"),
+            ("网络组织", ip.get("organization") or ip.get("network_name") or "待确认"),
+            ("CIDR 网段", ip.get("cidr") or "待确认"),
+            ("注册国家 / 注册局", f"{ip.get('registered_country') or '待确认'} / {ip.get('registry') or '待确认'}"),
+            ("时区", f"{ip.get('timezone') or '待确认'} {ip.get('timezone_utc') or ''}".strip()),
+            ("住宅 / 家宽", self._verified_label(ip.get("residential_status"))),
+            ("原生 IP", self._verified_label(ip.get("native_status"))),
+            ("风险信息", self._risk_label(ip)),
+        ]
+        self.network_identity_table.setRowCount(len(rows))
+        for row_index, (label, value) in enumerate(rows):
+            self.network_identity_table.setItem(row_index, 0, QTableWidgetItem(str(label)))
+            self.network_identity_table.setItem(row_index, 1, QTableWidgetItem(str(value)))
+        sources = "、".join(ip.get("sources") or [ip.get("source") or "无可用来源"])
+        confidence = {"high": "高", "medium": "中", "low": "低"}.get(ip.get("confidence"), ip.get("confidence") or "低")
+        self.network_source_label.setText(f"数据来源：{sources} · 综合可信度：{confidence}")
         for result in [item for item in report.items if item.check_id.startswith("network.")]:
             level = result.status.value.lower()
             self.network_details.append_event(CheckEvent("network_result", "network", f"{result.title}｜{result.value}｜{result.diagnosis}｜来源 {result.data_source}", level))
+
+    @staticmethod
+    def _verified_label(value) -> str:
+        if value is True or str(value).lower() in {"true", "yes", "residential", "native"}:
+            return "数据源已确认"
+        if value is False or str(value).lower() in {"false", "no"}:
+            return "数据源显示否"
+        return "待确认（当前数据源无法可靠证明）"
+
+    @staticmethod
+    def _risk_label(ip: dict) -> str:
+        value = ip.get("risk_label")
+        if not value or str(value).lower() in {"unverified", "unknown", "none"}:
+            return "待确认（未接入可信风险数据库）"
+        return str(value)
+
+    def _export_network_report(self) -> None:
+        if not self.current_report:
+            QMessageBox.information(self, "尚无网络报告", "请先完成一次开播检查。")
+            return
+        payload = {
+            "product": APP_NAME, "version": APP_VERSION, "report_id": self.current_report.report_id,
+            "checked_at": self.current_report.checked_at, "target_region_id": self.current_report.target_region_id,
+            "ip_profile": self.current_report.ip_profile, "network_snapshot": self.current_report.network_snapshot,
+            "analysis_items": [item.to_dict() for item in self.current_report.items if item.check_id.startswith("network.")],
+            "notice": "住宅、原生、纯净度和风险仅在数据源提供可核验证据时给出结论；待确认不等于异常。",
+        }
+        path, _ = QFileDialog.getSaveFileName(self, "导出网络报告", f"JC网络检测报告-{self.current_report.report_id}.json", "JSON (*.json)")
+        if path:
+            Path(path).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _repair_item(self, item: CheckResult, recheck: bool = True) -> bool:
         if item.repair_level == "confirm" and QMessageBox.question(self, "确认系统修改", "该操作会修改 Windows 设置，是否继续？") != QMessageBox.Yes:
@@ -1087,10 +1194,12 @@ class MainWindow(FramelessWindow):
         region_id = self.default_region_setting.currentData() if hasattr(self, "default_region_setting") else self.region.currentData()
         self.config.update({
             "target_region_id": region_id,
+            "startup_page": self.startup_page_select.currentData(), "remember_last_page": self.remember_last_page.isChecked(),
             "theme_id": self.theme_select.currentData(), "effects_level": self.effects_select.currentData(),
             "font_scale": self.font_select.currentData(), "test_mode": self.test_mode_select.currentData(),
             "result_sound": self.result_sound.isChecked(), "auto_open_report": self.auto_open_report.isChecked(),
             "update_check_on_start": self.update_on_start.isChecked(), "report_retention_days": self.retention_select.currentData(),
+            "show_check_tips": self.show_check_tips.isChecked(), "auto_compare_reports": self.auto_compare_reports.isChecked(),
             "upload_confirm": self.upload_confirm.isChecked(), "privacy_confirm_upload": self.upload_confirm.isChecked(),
             "reduced_effects": self.effects_select.currentData() == "light",
         })
@@ -1147,6 +1256,14 @@ class MainWindow(FramelessWindow):
         QApplication.clipboard().setText(self.config.get("device_id", ""))
         QMessageBox.information(self, "已复制", "设备编号已复制到剪贴板。")
 
+    def _show_integrity(self) -> None:
+        required = [resource_dir() / name for name in ("app_icon.ico", "收款码.jpg", "客服二维码.png")]
+        missing = [path.name for path in required if not path.is_file() or path.stat().st_size == 0]
+        if missing:
+            QMessageBox.warning(self, "完整性异常", "以下核心资源缺失：\n" + "\n".join(missing) + "\n\n请重新安装最新版。")
+        else:
+            QMessageBox.information(self, "完整性检查通过", "程序图标、付款二维码和客服二维码资源均完整。")
+
     def _show_changelog(self) -> None:
         try:
             rows = ClientApi(self.config["api_base"], self.config.get("device_token", "")).changelog().get("releases", [])
@@ -1196,6 +1313,9 @@ class MainWindow(FramelessWindow):
 
     def _show_page(self, index: int) -> None:
         self.pages.setCurrentIndex(index)
+        if self.config.get("remember_last_page"):
+            self.config["last_page"] = index
+            save_config(self.config)
         button = self.nav_group.button(index)
         if button:
             button.setChecked(True)

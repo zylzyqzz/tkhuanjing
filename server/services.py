@@ -31,7 +31,7 @@ DEFAULT_PROFILE = {
     "min_free_disk_gb": 10.0,
 }
 DEFAULT_SETTINGS = {
-    "product_name": "维度 TikTok 直播开播助手",
+    "product_name": "JC开播助手",
     "product_intro": "面向 TikTok 电脑直播公司和工作室的开播前技术准备度检测工具。",
     "product_features": "IP 与目标地区\n网络质量与真实测速\nWindows 直播环境\n电脑性能与后台占用\nGPU 与硬件编码器\n直播设备与插件\n直播软件与客户端完整性",
     "product_faq": "检测通过仅代表电脑、网络、设备和直播软件已达到技术准备条件。",

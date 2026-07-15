@@ -25,7 +25,7 @@ def _safe_text(value: str | None, fallback: str) -> str:
 
 def render_home(settings: dict[str, str], release: Release | None) -> str:
     esc = html.escape
-    name = _safe_text(settings.get("product_name"), "维度 TikTok 直播开播助手")
+    name = _safe_text(settings.get("product_name"), "JC开播助手")
     title = _safe_text(settings.get("home_hero_title"), "开播前，先检查")
     subtitle = _safe_text(settings.get("home_hero_subtitle"), "让每一次 TikTok 电脑直播，从准备充分开始。")
     intro = _safe_text(settings.get("product_intro"), "面向 TikTok／跨境电脑直播公司和工作室的开播前技术准备度检测工具。")

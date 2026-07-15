@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "weidu-tk-live-check"
-version = "2.4.0"
+version = "2.6.0"
 description = "TikTok 电脑直播开播前技术准备度检测系统"
 requires-python = ">=3.12,<3.14"
 dependencies = [

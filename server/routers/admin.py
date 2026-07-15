@@ -201,7 +201,8 @@ def setup_reports(limit: int = Query(200, ge=1, le=1000), _admin: dict = Depends
 @router.get("/nodes/status")
 def node_status(_admin: dict = Depends(current_admin)) -> dict:
     return {"nodes": [
-        {"name": "PingIP", "role": "IP 归属与辅助情报", "status": "configured", "mode": "primary"},
+        {"name": "Cloudflare + IPWho + RDAP", "role": "公网 IP、归属与注册信息", "status": "configured", "mode": "primary"},
+        {"name": "PingIP", "role": "可选 IP 属性增强", "status": "optional", "mode": "optional"},
         {"name": "Cloudflare Speed", "role": "上传与下载多轮采样", "status": "configured", "mode": "primary"},
         {"name": "Regional TLS probes", "role": "目标地区多节点响应", "status": "configured", "mode": "multi-node"},
     ], "policy": "单个第三方节点不可用时返回 UNKNOWN，不判定客户网络故障"}

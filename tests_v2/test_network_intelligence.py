@@ -3,8 +3,8 @@ from client_v2.streaming_config import discover_obs_profiles, discover_tiktok_pr
 
 
 class Response:
-    def __init__(self, text="", content=b"", data=None):
-        self.text = text; self.content = content; self._data = data or {}
+    def __init__(self, text="", content=b"", data=None, headers=None):
+        self.text = text; self.content = content; self._data = data or {}; self.headers = headers or {}
     def raise_for_status(self): return None
     def json(self): return self._data
 
@@ -15,14 +15,18 @@ def test_parse_pingip_sse():
     assert events["cleanliness"]["score"] == 92
 
 
-def test_lookup_falls_back_when_pingip_fails():
+def test_lookup_uses_independent_sources_when_pingip_fails():
     class Client:
         def get(self, url, **_kwargs):
-            if "pingip" in url: raise RuntimeError("offline")
             if "trace" in url: return Response(text="ip=8.8.8.8\nloc=US")
-            return Response(data={"country_code":"US","country":"United States","connection":{"isp":"Example","asn":123}})
+            if "ipwho" in url: return Response(data={"success":True,"ip":"8.8.8.8","type":"IPv4","country_code":"US","country":"United States","latitude":1.0,"longitude":2.0,"connection":{"isp":"Example","org":"Example Org","asn":123}})
+            if "rdap" in url: return Response(data={"cidr0_cidrs":[{"v4prefix":"8.8.8.0","length":24}],"port43":"whois.arin.net","name":"EXAMPLE"})
+            if "pingip" in url: raise RuntimeError("offline")
+            raise AssertionError(url)
     result = lookup_public_ip(Client())
-    assert result["ip"] == "8.8.8.8" and result["provider_status"] == "degraded"
+    assert result["ip"] == "8.8.8.8" and result["provider_status"] == "ok"
+    assert result["cidr"] == "8.8.8.0/24" and result["registry"] == "ARIN"
+    assert result["residential_status"] == "unverified"
 
 
 def test_speed_returns_raw_samples():

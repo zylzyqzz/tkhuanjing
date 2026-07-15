@@ -69,6 +69,14 @@ QComboBox, QLineEdit, QTextEdit, QSpinBox { background: rgba(4,13,23,.88); color
 QComboBox:focus, QLineEdit:focus { border-color: #4CAEFF; }
 QComboBox::drop-down { border: 0; width: 30px; }
 QComboBox QAbstractItemView { background: #0A1728; border: 1px solid #244A73; selection-background-color: #1F568D; }
+QTabWidget#settingsTabs { background: transparent; }
+QTabWidget#settingsTabs::pane { background: rgba(6,17,30,.72); border: 1px solid rgba(83,145,213,.22); border-radius: 14px; top: -1px; }
+QWidget#settingsPage { background: transparent; }
+QTabBar::tab { color: #7990AC; background: rgba(8,20,34,.82); border: 1px solid rgba(75,128,188,.20); border-bottom: 0; padding: 11px 20px; min-width: 110px; }
+QTabBar::tab:first { border-top-left-radius: 10px; }
+QTabBar::tab:last { border-top-right-radius: 10px; }
+QTabBar::tab:selected { color: #F2F8FF; background: rgba(25,64,105,.92); border-color: rgba(80,162,246,.46); }
+QTabBar::tab:hover:!selected { color: #C9DDF4; background: rgba(18,43,72,.88); }
 QProgressBar { background: rgba(13,30,50,.86); border: 0; border-radius: 5px; height: 8px; color: transparent; }
 QProgressBar::chunk { background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #2B8CFF,stop:1 #52E2D1); border-radius: 5px; }
 QScrollArea { background: transparent; border: 0; }
@@ -98,6 +106,8 @@ QFrame#titleBar, QFrame#sidebar { background: #F7FAFD; border-color: #C8D6E4; }
 QFrame[card="true"], QFrame[metricCard="true"], QFrame[moduleTile="true"], QFrame[modeCard="true"], QFrame[problemCard="true"] { background: #FFFFFF; border-color: #C5D5E4; }
 QTextEdit#terminal, QComboBox, QLineEdit, QTextEdit, QSpinBox { background: #F7FAFD; color: #183047; border-color: #B9CBDB; }
 QComboBox QAbstractItemView, QDialog { background: #FFFFFF; color: #183047; }
+QTabWidget#settingsTabs::pane, QTabBar::tab { background: #F7FAFD; color: #526C83; border-color: #C1D2E1; }
+QTabBar::tab:selected { background: #DCEBFA; color: #173550; }
 QTableWidget { background: #FFFFFF; alternate-background-color: #F5F8FB; color: #1E3449; border-color: #C2D2E1; }
 QHeaderView::section { background: #E5EEF6; color: #526C83; }
 QPushButton { color: #23415D; background: #E7F0F8; border-color: #B7CADB; }

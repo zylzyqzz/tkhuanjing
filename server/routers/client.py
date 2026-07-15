@@ -181,7 +181,8 @@ def regions() -> dict:
 @router.get("/network-intelligence/status")
 def network_intelligence_status() -> dict:
     return {"providers": [
-        {"name": "PingIP", "role": "IP 归属与辅助情报", "mode": "primary"},
+        {"name": "Cloudflare + IPWho + RDAP", "role": "公网 IP、归属与注册信息", "mode": "primary"},
+        {"name": "PingIP", "role": "可选 IP 属性增强", "mode": "optional"},
         {"name": "Cloudflare + GeoIP", "role": "公网 IP 与测速降级链路", "mode": "fallback"},
     ], "policy": "第三方数据失败时返回 UNKNOWN，不把服务失败判定为客户网络故障"}
 

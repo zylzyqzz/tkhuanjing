@@ -1,2 +1,2 @@
-APP_NAME = "维度 TikTok 直播开播助手"
-APP_VERSION = "2.5.0"
+APP_NAME = "JC开播助手"
+APP_VERSION = "2.6.0"
