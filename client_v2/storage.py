@@ -17,8 +17,8 @@ LICENSE_FILE = DATA_DIR / "license-v2.json"
 QUEUE_FILE = DATA_DIR / "pending-sync.json"
 
 DEFAULT_CONFIG = {
-    "schema_version": 5, "target_region_id": "us-los-angeles", "target_host": "tk.wdai.cc",
-    "api_base": "https://tk.wdai.cc", "device_id": "", "device_token": "",
+    "schema_version": 6, "target_region_id": "us-los-angeles", "target_host": "tk.aimj.xin",
+    "api_base": "https://tk.aimj.xin", "device_id": "", "device_token": "",
     "privacy_confirm_upload": True, "reduced_effects": False,
 }
 
@@ -79,6 +79,12 @@ def load_config() -> dict:
         if config.get("target_host") == "v.wdai.cc":
             config["target_host"] = "tk.wdai.cc"
         config["schema_version"] = 5
+    if int(config.get("schema_version", 1)) < 6:
+        if config.get("api_base") in {"http://127.0.0.1:8000", "https://v.wdai.cc", "https://tk.wdai.cc"}:
+            config["api_base"] = "https://tk.aimj.xin"
+        if config.get("target_host") in {"v.wdai.cc", "tk.wdai.cc"}:
+            config["target_host"] = "tk.aimj.xin"
+        config["schema_version"] = 6
     for key, value in DEFAULT_CONFIG.items():
         config.setdefault(key, value)
     if not config["device_id"]:
@@ -88,7 +94,7 @@ def load_config() -> dict:
 
 
 def save_config(config: dict) -> None:
-    config["schema_version"] = 5
+    config["schema_version"] = 6
     atomic_json(CONFIG_FILE, config)
 
 

@@ -12,8 +12,7 @@ import urllib.request
 
 APP_VERSION = "1.0.3"
 UPDATE_URLS = [
-    "http://v.wdai.cc:39999/api/client/update",
-    "https://v.wdai.cc/api/client/update",
+    "https://tk.aimj.xin/api/client/update",
 ]
 
 
