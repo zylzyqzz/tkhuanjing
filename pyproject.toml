@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "weidu-tk-live-check"
+version = "2.4.0"
+description = "TikTok 电脑直播开播前技术准备度检测系统"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.34,<1",
+  "sqlalchemy>=2.0,<3",
+  "alembic>=1.14,<2",
+  "pydantic-settings>=2.7,<3",
+  "argon2-cffi>=23.1,<26",
+  "python-multipart>=0.0.20,<1",
+  "itsdangerous>=2.2,<3",
+  "cryptography>=44,<46",
+  "PySide6>=6.8,<7",
+  "psutil>=6.1,<8",
+  "httpx>=0.28,<1",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.3,<9", "pytest-cov>=6,<8"]
+build = ["pyinstaller>=6.11,<7"]
+media = ["opencv-python-headless>=4.10,<5", "sounddevice>=0.5,<1", "numpy>=2.1,<3"]
+
+[tool.setuptools.packages.find]
+include = ["server*", "client_v2*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests_v2"]
+addopts = "-q --disable-warnings"
+
+[tool.coverage.run]
+source = ["server", "client_v2"]
+omit = ["client_v2/ui/*", "client_v2/main.py", "client_v2/updater_main.py"]
