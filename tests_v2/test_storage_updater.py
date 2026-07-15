@@ -21,7 +21,9 @@ def test_atomic_storage_config_reports_and_queue(tmp_path, monkeypatch):
     monkeypatch.setattr(storage, "CONFIG_FILE", tmp_path / "config.json")
     monkeypatch.setattr(storage, "LICENSE_FILE", tmp_path / "license.json")
     monkeypatch.setattr(storage, "QUEUE_FILE", tmp_path / "queue.json")
-    config = storage.load_config(); assert config["schema_version"] == 4 and config["device_id"]
+    config = storage.load_config()
+    assert config["schema_version"] == 5 and config["device_id"]
+    assert config["api_base"] == "https://tk.wdai.cc"
     assert config["reduced_effects"] is False
     config["target_region_id"] = "jp-tokyo"; storage.save_config(config)
     assert storage.load_config()["target_region_id"] == "jp-tokyo"
