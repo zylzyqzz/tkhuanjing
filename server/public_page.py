@@ -279,7 +279,7 @@ def render_home(settings: dict[str, str], release: Release | None) -> str:
     default_faq = (
         "为什么每天开播前都要检查？\n提前发现网络波动、设备占用、编码异常和系统配置变化。\n"
         "检测通过是否代表平台一定允许开播？\n不是，本工具只判断电脑、网络、设备和直播软件的技术准备情况。\n"
-        "软件收费吗？\n完全免费。注册赠送 3 天使用权限，填写完整资料后自动获得永久免费使用权限。"
+        "软件收费吗？\n开播检测服务免费使用，具体使用说明请在客户端内查看。"
     )
     faq_raw = _safe_text(settings.get("product_faq"), default_faq)
     if any(word in faq_raw for word in ("付费", "续费", "套餐", "付款", "激活码")):
@@ -321,10 +321,10 @@ def render_home(settings: dict[str, str], release: Release | None) -> str:
 
     tiers_html = """
 <article class='tier featured'>
-    <span class='badge'>第一步</span>
-    <span class='tag'>REGISTER · 注册即用</span>
-    <div class='price'>3<small> 天免费使用</small></div>
-    <p class='desc'>使用手机号和邮箱完成注册，立即获得完整功能。</p>
+    <span class='badge'>免费检测</span>
+    <span class='tag'>FREE · 开播前体检</span>
+    <div class='price'>免费<small> · 注册即用</small></div>
+    <p class='desc'>下载安装客户端，检查电脑环境、网络质量和直播配置。</p>
     <ul>
         <li>完整 7 组开播检查</li>
         <li>一键配置环境</li>
@@ -332,13 +332,13 @@ def render_home(settings: dict[str, str], release: Release | None) -> str:
     </ul>
 </article>
 <article class='tier'>
-    <span class='tag'>PERMANENT · 完善资料</span>
-    <div class='price'>永久<small> · 自动生效</small></div>
-    <p class='desc'>填写公司、国家、业务类型和微信号后自动获得。</p>
+    <span class='tag'>SUPPORT · 技术服务</span>
+    <div class='price'>专业<small> · 明确建议</small></div>
+    <p class='desc'>检测异常会说明实际影响，并给出修复、复测或线路建议。</p>
     <ul>
-        <li>永久免费使用</li>
-        <li>持续跟进版本更新</li>
-        <li>无需付款或输入激活码</li>
+        <li>网络问题给出专业建议</li>
+        <li>电脑环境支持一键配置</li>
+        <li>硬件问题生成参考报告</li>
     </ul>
 </article>
 """
@@ -346,14 +346,14 @@ def render_home(settings: dict[str, str], release: Release | None) -> str:
     return f"""<!doctype html><html lang='zh-CN'><head>
 <meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
 <title>{esc(name)}｜开播前技术准备度检测 · 完全免费</title>
-<meta name='description' content='{esc(intro)} 注册赠送 3 天使用权限，填写完整资料后永久免费。'>
+<meta name='description' content='{esc(intro)} 免费提供开播前电脑环境与网络检测。'>
 <style>{CSS}</style></head><body>
 <div class='gridbg'></div>
 
 <nav><div class='inner'>
     <a class='brand' href='/'><img src='/assets/logo.png' width='38' height='38' alt='VD Logo'>{esc(name)}</a>
     <div class='nav-links'>
-        <a href='#tiers'>免费使用</a>
+        <a href='#tiers'>免费检测</a>
         <a href='#modes'>核心能力</a>
         <a href='#faq'>常见问题</a>
         <a class='{dl_cls}' href='{dl_href}'>下载 V{esc(version)}</a>
@@ -363,12 +363,12 @@ def render_home(settings: dict[str, str], release: Release | None) -> str:
 <main>
 <section class='hero'>
     <div>
-        <span class='eyebrow'><span class='dot'></span>V{SITE_VERSION} · 注册赠送 3 天 · 完善资料永久免费</span>
+        <span class='eyebrow'><span class='dot'></span>V{SITE_VERSION} · 免费开播前检测</span>
         <h1>{esc(title)}<br><em>技术准备好，再点开播</em></h1>
         <p class='lead'>{esc(subtitle)}<br>{esc(intro)}</p>
         <div class='cta-row'>
             <a class='{dl_cls} btn-lg' href='{dl_href}'>免费下载 V{esc(version)} →</a>
-            <a class='btn btn-ghost btn-lg' href='#tiers'>了解免费使用规则</a>
+            <a class='btn btn-ghost btn-lg' href='#modes'>了解检测能力</a>
         </div>
         <p class='cta-hint'>Windows 10 / 11 · 硬安装程序 · {esc(size)}</p>
     </div>
@@ -382,8 +382,8 @@ def render_home(settings: dict[str, str], release: Release | None) -> str:
 
 <section class='block' id='tiers'>
     <div class='section-head'>
-        <div><span class='eyebrow'>FREE ACCESS</span><h2>注册赠送 3 天 · 完善资料永久免费</h2></div>
-        <p>不设置收费套餐、不展示付款二维码。填写完整资料后，永久免费权限自动生效。</p>
+        <div><span class='eyebrow'>FREE CHECK</span><h2>免费的开播前技术体检</h2></div>
+        <p>先把电脑环境和网络情况检查清楚，再决定如何处理。</p>
     </div>
     <div class='tiers'>{tiers_html}</div>
 </section>
@@ -452,7 +452,6 @@ def render_home(settings: dict[str, str], release: Release | None) -> str:
     {esc(settings.get('home_extra_notice', ''))}
     <div class='foot-links'>
         <a href='/'>主页</a>
-        <a href='/tk-admin/'>管理后台</a>
         <a href='{dl_href}'>下载最新版</a>
     </div>
 </footer>
