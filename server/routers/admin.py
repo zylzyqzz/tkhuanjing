@@ -147,7 +147,7 @@ def save_device(payload: DeviceIn, admin: dict = Depends(require_csrf), db: Sess
 
 
 @router.get("/reports")
-def reports(status: str = "", q: str = "", limit: int = Query(200, ge=1, le=1000), _admin: dict = Depends(current_admin), db: Session = Depends(get_db)) -> dict:
+def reports(status: str = "", q: str = "", tag: str = "", limit: int = Query(200, ge=1, le=1000), _admin: dict = Depends(current_admin), db: Session = Depends(get_db)) -> dict:
     stmt = select(CheckReport).order_by(CheckReport.checked_at.desc())
     if status:
         if status in {"READY", "READY_WITH_RISK", "NOT_READY", "INCOMPLETE"}:
@@ -156,8 +156,14 @@ def reports(status: str = "", q: str = "", limit: int = Query(200, ge=1, le=1000
             stmt = stmt.where(CheckReport.overall_status == status)
     if q:
         stmt = stmt.where(or_(CheckReport.target_region_id.contains(q), CheckReport.device_id.contains(q)))
-    fields = ["report_id", "device_id", "run_mode", "target_region_id", "schema_version", "app_version", "checked_at", "overall_status", "conclusion", "readiness_level", "blocking_count", "high_risk_count", "test_mode", "uploaded_at"]
-    return {"reports": [row_dict(x, fields) for x in db.scalars(stmt.limit(limit)).all()]}
+    fields = ["report_id", "device_id", "customer_name", "room_name", "run_mode", "target_region_id", "schema_version", "app_version", "checked_at", "overall_status", "conclusion", "readiness_level", "blocking_count", "high_risk_count", "test_mode", "uploaded_at"]
+    result = []
+    for row in db.scalars(stmt.limit(limit)).all():
+        tags = json.loads(row.issue_tags_json or "[]")
+        if tag and tag not in tags:
+            continue
+        result.append(row_dict(row, fields) | {"issue_tags": tags})
+    return {"reports": result}
 
 
 @router.get("/report/{report_id}")
@@ -188,6 +194,7 @@ def report(report_id: str, _admin: dict = Depends(current_admin), db: Session = 
         "confidence_summary": json.loads(row.confidence_summary_json or "{}"),
         "baseline_delta": json.loads(row.baseline_delta_json or "{}"),
         "source_health": json.loads(row.source_health_json or "{}"),
+        "issue_tags": json.loads(row.issue_tags_json or "[]"),
     }, "items": items}
 
 

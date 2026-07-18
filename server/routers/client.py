@@ -153,6 +153,7 @@ def upload_report(payload: ReportIn, device: Device = Depends(current_device), d
         high_risk_count=payload.high_risk_count, test_mode=payload.test_mode,
         baseline_delta_json=json.dumps(payload.baseline_delta, ensure_ascii=False),
         source_health_json=json.dumps(payload.source_health, ensure_ascii=False),
+        issue_tags_json=json.dumps(payload.issue_tags, ensure_ascii=False),
     )
     report.items = [CheckItem(
         check_id=item.check_id, category=item.category, status=item.status, title=item.title,

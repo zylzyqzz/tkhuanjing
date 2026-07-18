@@ -53,7 +53,7 @@ REQUIRED_COLUMNS = {
         "confidence_summary_json text default '{}'",
         "readiness_level text default 'INCOMPLETE'", "blocking_count integer default 0",
         "high_risk_count integer default 0", "test_mode text default 'standard'",
-        "baseline_delta_json text default '{}'", "source_health_json text default '{}'",
+        "baseline_delta_json text default '{}'", "source_health_json text default '{}'", "issue_tags_json text default '[]'",
     ],
     "check_items": [
         "evidence_json text default '[]'", "metrics_json text default '{}'", "diagnosis text default ''",

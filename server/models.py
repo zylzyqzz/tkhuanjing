@@ -137,6 +137,7 @@ class CheckReport(Base):
     test_mode: Mapped[str] = mapped_column(String(20), default="standard")
     baseline_delta_json: Mapped[str] = mapped_column(Text, default="{}")
     source_health_json: Mapped[str] = mapped_column(Text, default="{}")
+    issue_tags_json: Mapped[str] = mapped_column(Text, default="[]")
     uploaded_at: Mapped[str] = mapped_column(String(40), default=now_iso)
     items: Mapped[list[CheckItem]] = relationship(cascade="all, delete-orphan")
 

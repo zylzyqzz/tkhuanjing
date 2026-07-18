@@ -79,6 +79,7 @@ class ReportIn(BaseModel):
     test_mode: Literal["quick", "standard", "deep"] = "standard"
     baseline_delta: dict[str, Any] = Field(default_factory=dict)
     source_health: dict[str, Any] = Field(default_factory=dict)
+    issue_tags: list[str] = Field(default_factory=list, max_length=30)
     items: list[CheckItemIn] = Field(max_length=300)
 
 

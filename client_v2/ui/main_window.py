@@ -1311,7 +1311,7 @@ class MainWindow(FramelessWindow):
         report = self.current_report
         colors = {Status.PASS: COLORS["pass"], Status.WARNING: COLORS["warning"], Status.FAIL: COLORS["fail"], Status.UNKNOWN: COLORS["unknown"]}
         readiness_labels = {
-            "READY": "可以开播", "READY_WITH_RISK": "可以开播 · 存在风险",
+            "READY": "可以开播", "READY_WITH_RISK": "可以开播 · 有网络/硬件建议",
             "NOT_READY": "暂不建议开播", "INCOMPLETE": "关键检测未完成",
         }
         self.report_badge.setText(readiness_labels.get(report.readiness_level, report.overall_status.value))

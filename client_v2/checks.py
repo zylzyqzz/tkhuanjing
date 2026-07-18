@@ -78,13 +78,16 @@ def ping_metrics(host: str, count: int = 8) -> tuple[float, float, float, int]:
 
 
 def _priority(check_id: str, status: Status) -> str:
-    if check_id == "network.throughput":
-        return "BLOCKING"
-    if check_id.startswith(("network.public_ip", "network.ip_quality", "network.target_route", "system.timezone", "system.region_consistency")):
+    # The launch gate is intentionally limited to software/environment
+    # failures. Network quality, IP/provider intelligence and hardware are
+    # reported as advice only, even when their measurements are poor.
+    if check_id.startswith(("system.", "environment.", "streaming.", "client.")):
+        return "BLOCKING" if status == Status.FAIL else "ADVISORY"
+    if check_id.startswith("network."):
         return "ADVISORY"
-    if check_id in {"client.service", "environment.security_services", "environment.tiktok_processes"}:
+    if check_id.startswith(("performance.", "devices.")):
         return "INFORMATIONAL"
-    return "HIGH_RISK" if status in {Status.FAIL, Status.WARNING} else "INFORMATIONAL"
+    return "INFORMATIONAL"
 
 
 def _result(check_id: str, category: str, status: Status, title: str, value: str, *, evidence: list[str], diagnosis: str, impact: str, solutions: list[str] | None = None, metrics: dict | None = None, source: str = "本机实测", confidence: str = "high", repair_id: str = "", repair_level: str = "manual", verify: list[str] | None = None, priority: str = "") -> CheckResult:
