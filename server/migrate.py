@@ -54,6 +54,8 @@ REQUIRED_COLUMNS = {
         "readiness_level text default 'INCOMPLETE'", "blocking_count integer default 0",
         "high_risk_count integer default 0", "test_mode text default 'standard'",
         "baseline_delta_json text default '{}'", "source_health_json text default '{}'", "issue_tags_json text default '[]'",
+        "environment_summary text default '检测未完成'", "network_summary text default '检测未完成'",
+        "hardware_summary text default '仅供参考'", "next_action text default ''", "ai_analysis_json text default '{}'",
     ],
     "check_items": [
         "evidence_json text default '[]'", "metrics_json text default '{}'", "diagnosis text default ''",

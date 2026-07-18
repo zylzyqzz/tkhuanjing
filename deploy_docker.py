@@ -3,11 +3,13 @@ import paramiko, os, hashlib
 
 HOST = "111.170.171.25"
 USER = "root"
-PASSWORD = "Zyl@403480762"
+PASSWORD = os.environ.get("TK_DEPLOY_PASSWORD", "")
 BASE = r"C:\Users\Administrator\Documents\Codex\2026-07-12\c-users-administrator-desktop-pro\work\tk_platform"
 LOCAL_EXE = os.path.join(BASE, "dist", "VD开播助手.exe")
 
 def main():
+    if not PASSWORD:
+        raise RuntimeError("请通过 TK_DEPLOY_PASSWORD 环境变量提供部署密码")
     h = hashlib.sha256(open(LOCAL_EXE, "rb").read()).hexdigest()
     s = os.path.getsize(LOCAL_EXE)
 

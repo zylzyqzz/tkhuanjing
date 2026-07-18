@@ -32,6 +32,12 @@ class Settings(BaseSettings):
     verify_code_ttl_minutes: int = 10
     verify_code_cooldown_seconds: int = 60
     user_session_hours: int = 720
+    ai_enabled: bool = False
+    ai_base_url: str = ""
+    ai_api_key: str = ""
+    ai_model: str = ""
+    ai_timeout_seconds: float = 20.0
+    report_retention_days: int = 180
 
     @property
     def downloads_dir(self) -> Path:

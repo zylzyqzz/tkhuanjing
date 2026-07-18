@@ -48,7 +48,8 @@ def test_client_registration_authorization_and_report(tmp_path):
             "app_version": "2.1.0", "checked_at": "2026-07-14T00:00:00+00:00",
             "overall_status": "PASS", "conclusion": "可以开播",
             "schema_version": 4, "run_mode": "environment_setup", "target_region_id": "us-los-angeles",
-            "network_snapshot": {"upload_mbps": 20}, "ip_profile": {"ip": "1.2.3.4"},
+            "network_snapshot": {"network.throughput": {"upload_mbps": 20, "jitter_ms": 12, "latency_ms": 80}},
+            "ip_profile": {"ip": "1.2.3.4", "isp": "Example Access", "asn": "AS64500", "country_code": "US", "network_type": "isp"},
             "environment_snapshot": {"system.timezone": {"value": "Pacific Standard Time"}},
             "before_snapshot": {"timezone": "China Standard Time"}, "after_snapshot": {"timezone": "Pacific Standard Time"},
             "check_logs": [{"event": "check_started", "module": "core", "message": "开始", "level": "info"}],
@@ -66,6 +67,11 @@ def test_client_registration_authorization_and_report(tmp_path):
         assert detail["before_snapshot"]["timezone"] == "China Standard Time"
         assert client.get("/tk-api/setup-reports").json()["reports"][0]["report_id"] == report["report_id"]
         assert client.get("/tk-api/nodes/status").json()["nodes"]
+        reports = client.get("/tk-api/reports", params={"provider": "Example", "ip": "1.2.3", "asn": "64500"}).json()["reports"]
+        assert reports[0]["provider"] == "Example Access"
+        assert reports[0]["environment_summary"] == "正常"
+        providers = client.get("/tk-api/providers").json()["providers"]
+        assert providers[0]["advice"] == "待核实" and providers[0]["sample_count"] == 1
 
 
 def test_user_registration_requires_a_valid_email_code(tmp_path):

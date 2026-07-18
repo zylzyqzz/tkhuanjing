@@ -47,7 +47,8 @@ def test_report_precedence_and_schema():
         CheckResult("network.throughput", "网络", Status.FAIL, "稳定上传"),
     ])
     report.finalize()
-    assert report.overall_status == Status.FAIL
+    assert report.overall_status == Status.WARNING
+    assert report.blocking_count == 0
     payload = report.to_dict()
     assert payload["schema_version"] == 5
     assert payload["run_mode"] == "daily_preflight"
@@ -70,3 +71,15 @@ def test_missing_optional_camera_does_not_block_opening_stream():
     report.finalize()
     assert report.blocking_count == 0
     assert report.readiness_level == "READY"
+
+
+def test_only_explicit_environment_failure_blocks_opening_stream():
+    report = CheckReport("device", "2.9.1", [
+        CheckResult("client.assets", "客户端", Status.FAIL, "品牌资源"),
+        CheckResult("streaming.configuration_integrity", "直播软件", Status.FAIL, "核心配置损坏", repairable=True),
+    ])
+    report.finalize()
+    assert report.blocking_count == 1
+    assert report.readiness_level == "NOT_READY"
+    assert report.items[0].blocking is False
+    assert report.items[1].blocking is True

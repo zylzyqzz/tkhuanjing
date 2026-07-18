@@ -8,5 +8,5 @@ a = Analysis(
     excludes=["PySide6", "tkinter", "pytest"], noarchive=False,
 )
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="TKAdminLocal", debug=False, strip=False, upx=True, console=False, icon=str(root / "assets" / "app_icon.ico"))
-coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=True, name="TKAdminLocal")
+exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="TKAdminLocal", debug=False, strip=False, upx=False, console=False, icon=str(root / "assets" / "app_icon.ico"))
+coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="TKAdminLocal")

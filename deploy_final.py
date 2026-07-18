@@ -5,9 +5,11 @@ sys.stdout.reconfigure(encoding='utf-8')
 
 HOST = '111.170.171.25'
 USER = 'root'
-PASSWORD = 'Zyl@403480762'
+PASSWORD = os.environ.get('TK_DEPLOY_PASSWORD', '')
 BASE = r'C:\Users\Administrator\Desktop\VD开播助手_V2.8.1'
 
+if not PASSWORD:
+    raise RuntimeError('请通过 TK_DEPLOY_PASSWORD 环境变量提供部署密码')
 ssh = paramiko.SSHClient()
 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 ssh.connect(HOST, username=USER, password=PASSWORD, timeout=15, look_for_keys=False, allow_agent=False)

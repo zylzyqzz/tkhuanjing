@@ -80,6 +80,10 @@ class ReportIn(BaseModel):
     baseline_delta: dict[str, Any] = Field(default_factory=dict)
     source_health: dict[str, Any] = Field(default_factory=dict)
     issue_tags: list[str] = Field(default_factory=list, max_length=30)
+    environment_summary: str = Field(default="检测未完成", max_length=100)
+    network_summary: str = Field(default="检测未完成", max_length=160)
+    hardware_summary: str = Field(default="仅供参考", max_length=100)
+    next_action: str = Field(default="", max_length=1000)
     items: list[CheckItemIn] = Field(max_length=300)
 
 

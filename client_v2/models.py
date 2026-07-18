@@ -20,8 +20,15 @@ PRIORITIES = {"BLOCKING", "HIGH_RISK", "ADVISORY", "INFORMATIONAL"}
 # broadcast. Network quality, provider intelligence, and hardware readings are
 # advisory by design: they must be explained and recorded, never treated as a
 # binary eligibility gate.
-ENVIRONMENT_CHECK_PREFIXES = ("system.", "environment.", "streaming.", "client.")
-CRITICAL_CHECKS: set[str] = set()
+LAUNCH_BLOCKING_CHECKS = {
+    "streaming.launch",
+    "streaming.configuration_integrity",
+    "system.clock_integrity",
+    "network.proxy_connectivity",
+    "network.dns_connectivity",
+    "devices.required_capture_permission",
+    "devices.required_microphone_permission",
+}
 
 
 @dataclass(slots=True)
@@ -59,17 +66,19 @@ class CheckResult:
             self.solutions = [self.action]
         if self.priority not in PRIORITIES:
             self.priority = "INFORMATIONAL"
-        if self.priority == "INFORMATIONAL":
-            if self.check_id.startswith(ENVIRONMENT_CHECK_PREFIXES):
-                self.priority = "BLOCKING" if self.status == Status.FAIL else "ADVISORY"
-            elif self.check_id.startswith("network."):
-                self.priority = "ADVISORY"
-            else:
-                # Hardware/performance observations are informational. They
-                # can be useful in a report without labelling a customer as
-                # unable to go live.
-                self.priority = "INFORMATIONAL"
-        self.blocking = self.blocking or self.priority == "BLOCKING"
+        # Never trust a caller-supplied priority/blocking flag. Launch blocking
+        # is a small auditable allow-list of deterministic software failures.
+        self.blocking = self.check_id in LAUNCH_BLOCKING_CHECKS and self.status == Status.FAIL
+        if self.blocking:
+            self.priority = "BLOCKING"
+        elif self.check_id.startswith("network."):
+            self.priority = "ADVISORY"
+        elif self.check_id.startswith(("performance.", "devices.")):
+            self.priority = "INFORMATIONAL"
+        elif self.status in {Status.FAIL, Status.WARNING}:
+            self.priority = "ADVISORY"
+        else:
+            self.priority = "INFORMATIONAL"
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -102,6 +111,10 @@ class CheckReport:
     baseline_delta: dict[str, Any] = field(default_factory=dict)
     source_health: dict[str, Any] = field(default_factory=dict)
     issue_tags: list[str] = field(default_factory=list)
+    environment_summary: str = "检测未完成"
+    network_summary: str = "检测未完成"
+    hardware_summary: str = "仅供参考"
+    next_action: str = "完成检测后生成建议"
     report_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     checked_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     overall_status: Status = Status.UNKNOWN
@@ -110,15 +123,11 @@ class CheckReport:
 
     def finalize(self) -> None:
         self.blocking_count = sum(1 for item in self.items if item.blocking and item.status == Status.FAIL)
-        self.high_risk_count = sum(1 for item in self.items if item.priority == "HIGH_RISK" and item.status in {Status.FAIL, Status.WARNING})
-        critical_unknown = [item for item in self.items if item.check_id in CRITICAL_CHECKS and item.status == Status.UNKNOWN]
+        self.high_risk_count = sum(1 for item in self.items if item.check_id.startswith("network.") and item.status in {Status.FAIL, Status.WARNING})
         advisory_risk = any(item.priority == "ADVISORY" and item.status in {Status.FAIL, Status.WARNING} for item in self.items)
         if self.blocking_count:
             self.readiness_level, self.overall_status = "NOT_READY", Status.FAIL
             self.conclusion = f"当前不建议开播 · {self.blocking_count} 个阻断问题需要先处理"
-        elif critical_unknown:
-            self.readiness_level, self.overall_status = "INCOMPLETE", Status.UNKNOWN
-            self.conclusion = f"关键检测未完成 · 还有 {len(critical_unknown)} 项需要复检"
         elif self.high_risk_count or advisory_risk:
             # Advisory network/provider findings do not change the launch
             # decision. Keep the report actionable while confirming that the
@@ -130,6 +139,19 @@ class CheckReport:
             self.conclusion = "技术准备检查通过，可以开始直播"
         unknown = sum(1 for item in self.items if item.status == Status.UNKNOWN)
         self.issue_tags = sorted({tag for item in self.items for tag in _issue_tags(item)})
+        self.environment_summary = "暂不建议开播" if self.blocking_count else "需要一键修复" if any(i.repairable and i.status in {Status.FAIL, Status.WARNING} for i in self.items if not i.check_id.startswith(("network.", "performance.", "devices."))) else "正常"
+        network_items = [i for i in self.items if i.check_id.startswith("network.")]
+        if any(i.status == Status.UNKNOWN for i in network_items):
+            self.network_summary = "待核实"
+        elif any(i.status == Status.FAIL for i in network_items):
+            self.network_summary = "建议联系服务商或更换线路"
+        elif any(i.status == Status.WARNING for i in network_items):
+            self.network_summary = "建议关注"
+        else:
+            self.network_summary = "稳定"
+        hardware_items = [i for i in self.items if i.check_id.startswith(("performance.", "devices."))]
+        self.hardware_summary = "参考建议" if any(i.status != Status.PASS for i in hardware_items) else "正常"
+        self.next_action = "先修复电脑环境并复测" if self.blocking_count else "持续测试或联系服务商" if self.network_summary in {"建议关注", "建议联系服务商或更换线路"} else "可以直接开播"
         self.source_health = self.source_health or {"unknown_items": unknown, "total_items": len(self.items), "healthy": unknown == 0}
 
     def to_dict(self) -> dict[str, Any]:
@@ -151,6 +173,8 @@ class CheckReport:
             "high_risk_count": self.high_risk_count, "test_mode": self.test_mode,
             "baseline_delta": self.baseline_delta, "source_health": self.source_health,
             "issue_tags": self.issue_tags,
+            "environment_summary": self.environment_summary, "network_summary": self.network_summary,
+            "hardware_summary": self.hardware_summary, "next_action": self.next_action,
             "overall_status": self.overall_status.value, "conclusion": self.conclusion,
             "uploaded": self.uploaded, "items": [x.to_dict() for x in self.items],
             "disclaimer": "本报告仅判断电脑、网络、设备和直播软件的技术准备情况，不代表平台账号审核、流量或开播权限结果。",

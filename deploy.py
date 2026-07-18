@@ -2,10 +2,12 @@ import paramiko, os, hashlib, sys
 
 HOST = "111.170.171.25"
 USER = "root"
-PASSWORD = "Zyl@403480762"
+PASSWORD = os.environ.get("TK_DEPLOY_PASSWORD", "")
 BASE = r"C:\Users\Administrator\Documents\Codex\2026-07-12\c-users-administrator-desktop-pro\work\tk_platform"
 
 def main():
+    if not PASSWORD:
+        raise RuntimeError("请通过 TK_DEPLOY_PASSWORD 环境变量提供部署密码")
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     ssh.connect(HOST, username=USER, password=PASSWORD, timeout=15, look_for_keys=False, allow_agent=False)

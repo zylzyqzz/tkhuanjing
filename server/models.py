@@ -138,6 +138,11 @@ class CheckReport(Base):
     baseline_delta_json: Mapped[str] = mapped_column(Text, default="{}")
     source_health_json: Mapped[str] = mapped_column(Text, default="{}")
     issue_tags_json: Mapped[str] = mapped_column(Text, default="[]")
+    environment_summary: Mapped[str] = mapped_column(String(80), default="检测未完成")
+    network_summary: Mapped[str] = mapped_column(String(100), default="检测未完成")
+    hardware_summary: Mapped[str] = mapped_column(String(80), default="仅供参考")
+    next_action: Mapped[str] = mapped_column(Text, default="")
+    ai_analysis_json: Mapped[str] = mapped_column(Text, default="{}")
     uploaded_at: Mapped[str] = mapped_column(String(40), default=now_iso)
     items: Mapped[list[CheckItem]] = relationship(cascade="all, delete-orphan")
 

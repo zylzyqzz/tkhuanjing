@@ -489,6 +489,14 @@ class MainWindow(FramelessWindow):
         self.repair_all_button.setEnabled(False)
         summary_box.addWidget(self.repair_all_button)
         layout.addWidget(summary)
+        outcome_row = QHBoxLayout()
+        self.environment_outcome = MetricCard("电脑环境", "尚未检测")
+        self.network_outcome = MetricCard("网络情况", "尚未检测")
+        self.hardware_outcome = MetricCard("硬件兼容", "仅供参考")
+        self.next_action_outcome = MetricCard("下一步建议", "完成检测后生成")
+        for widget in (self.environment_outcome, self.network_outcome, self.hardware_outcome, self.next_action_outcome):
+            outcome_row.addWidget(widget)
+        layout.addLayout(outcome_row)
         metric_row = QHBoxLayout()
         self.report_metrics = {
             "ip": MetricCard("公网 IP", "--"), "down": MetricCard("下载速度", "--", "Mbps"),
@@ -741,6 +749,8 @@ class MainWindow(FramelessWindow):
         self.send_code_btn.clicked.connect(self._do_send_code)
         code_row.addWidget(self.send_code_btn)
         register_form.addLayout(code_row)
+        self.reg_consent = QCheckBox("我已阅读并同意：检测报告将绑定账号和脱敏设备标识上传后台，用于技术支持与服务商质量分析；详细报告默认保留 180 天，可申请删除。")
+        register_form.addWidget(self.reg_consent)
         register_form.addSpacing(6)
         reg_btn = QPushButton("免费注册")
         reg_btn.setProperty("primary", True)
@@ -948,6 +958,9 @@ class MainWindow(FramelessWindow):
         p2 = self.reg_password2.text()
         code = self.reg_code.text().strip()
         reg_error = self.auth_stack.widget(1).findChild(QLabel, "regError")
+        if not self.reg_consent.isChecked():
+            if reg_error: reg_error.setText("请先确认检测数据采集与保存说明")
+            return
         if not phone or not email or not p1 or not code:
             if reg_error: reg_error.setText("请填写手机号、邮箱、验证码和密码")
             return
@@ -1324,7 +1337,11 @@ class MainWindow(FramelessWindow):
             upload = baseline.get("upload_mbps", {})
             upload_text = f" · 稳定上传较上次 {'+' if upload.get('change', 0) >= 0 else ''}{upload.get('change')} Mbps" if upload else ""
             comparison = f"\n与上次比较：新增 {new_count} 项 · 已恢复 {resolved_count} 项{upload_text}"
-        self.report_conclusion.setText(f"{report.conclusion}\n{counts[Status.FAIL]} 个严重问题 · {counts[Status.WARNING]} 个风险项 · {counts[Status.PASS]} 项正常 · {counts[Status.UNKNOWN]} 项未完成{comparison}")
+        self.report_conclusion.setText(f"{report.conclusion}\n{report.blocking_count} 个电脑环境阻断项 · {report.high_risk_count} 个网络建议 · {counts[Status.PASS]} 项正常 · {counts[Status.UNKNOWN]} 项待核实{comparison}")
+        self.environment_outcome.set_value(report.environment_summary)
+        self.network_outcome.set_value(report.network_summary)
+        self.hardware_outcome.set_value(report.hardware_summary)
+        self.next_action_outcome.set_value(report.next_action)
         problems = [item for item in report.items if item.status != Status.PASS]
         safe = [item for item in problems if item.repairable and item.repair_level == "safe"]
         self.repair_all_button.setEnabled(bool(safe))

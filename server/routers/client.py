@@ -14,6 +14,8 @@ from ..security import current_device, current_user, hash_token, hasher, user_fr
 from ..services import DEFAULT_PROFILE, release_manifest
 from ..config import get_settings
 from ..email_utils import send_verification_code
+from ..ai_service import explain
+from ..report_policy import authoritative_report
 from client_v2.regions import REGIONS
 
 
@@ -133,10 +135,23 @@ def authorize(
 def upload_report(payload: ReportIn, device: Device = Depends(current_device), db: Session = Depends(get_db)) -> dict:
     if db.get(CheckReport, payload.report_id):
         return {"ok": True, "idempotent": True, "report_id": payload.report_id}
+    item_rows = [CheckItem(
+        check_id=item.check_id, category=item.category, status=item.status, title=item.title,
+        value=item.value, reason=item.reason, action=item.action, repairable=item.repairable,
+        details_json=json.dumps(item.details, ensure_ascii=False),
+        evidence_json=json.dumps(item.evidence, ensure_ascii=False), metrics_json=json.dumps(item.metrics, ensure_ascii=False),
+        diagnosis=item.diagnosis, impact=item.impact, solutions_json=json.dumps(item.solutions, ensure_ascii=False),
+        data_source=item.data_source, confidence=item.confidence, repair_id=item.repair_id,
+        repair_level=item.repair_level, verification_json=json.dumps(item.verification_check_ids, ensure_ascii=False),
+        duration_ms=item.duration_ms, error_code=item.error_code, priority=item.priority, blocking=False,
+        repair_outcome_json=json.dumps(item.repair_outcome, ensure_ascii=False),
+    ) for item in payload.items]
+    decision = authoritative_report(item_rows)
+    ai_analysis = explain(decision, payload.ip_profile)
     report = CheckReport(
         report_id=payload.report_id, device_id=device.device_id, customer_name=payload.customer_name,
         room_name=payload.room_name, app_version=payload.app_version, checked_at=payload.checked_at,
-        overall_status=payload.overall_status, conclusion=payload.conclusion,
+        overall_status=decision["overall_status"], conclusion=decision["conclusion"],
         schema_version=payload.schema_version, run_mode=payload.run_mode, target_region_id=payload.target_region_id,
         network_snapshot_json=json.dumps(payload.network_snapshot, ensure_ascii=False),
         ip_profile_json=json.dumps(payload.ip_profile, ensure_ascii=False),
@@ -149,24 +164,16 @@ def upload_report(payload: ReportIn, device: Device = Depends(current_device), d
         before_snapshot_json=json.dumps(payload.before_snapshot, ensure_ascii=False),
         after_snapshot_json=json.dumps(payload.after_snapshot, ensure_ascii=False),
         confidence_summary_json=json.dumps(payload.confidence_summary, ensure_ascii=False),
-        readiness_level=payload.readiness_level, blocking_count=payload.blocking_count,
-        high_risk_count=payload.high_risk_count, test_mode=payload.test_mode,
+        readiness_level=decision["readiness_level"], blocking_count=decision["blocking_count"],
+        high_risk_count=decision["high_risk_count"], test_mode=payload.test_mode,
         baseline_delta_json=json.dumps(payload.baseline_delta, ensure_ascii=False),
         source_health_json=json.dumps(payload.source_health, ensure_ascii=False),
-        issue_tags_json=json.dumps(payload.issue_tags, ensure_ascii=False),
+        issue_tags_json=json.dumps(decision["issue_tags"], ensure_ascii=False),
+        environment_summary=decision["environment_summary"], network_summary=decision["network_summary"],
+        hardware_summary=decision["hardware_summary"], next_action=decision["next_action"],
+        ai_analysis_json=json.dumps(ai_analysis, ensure_ascii=False),
     )
-    report.items = [CheckItem(
-        check_id=item.check_id, category=item.category, status=item.status, title=item.title,
-        value=item.value, reason=item.reason, action=item.action, repairable=item.repairable,
-        details_json=json.dumps(item.details, ensure_ascii=False),
-        evidence_json=json.dumps(item.evidence, ensure_ascii=False), metrics_json=json.dumps(item.metrics, ensure_ascii=False),
-        diagnosis=item.diagnosis, impact=item.impact, solutions_json=json.dumps(item.solutions, ensure_ascii=False),
-        data_source=item.data_source, confidence=item.confidence, repair_id=item.repair_id,
-        repair_level=item.repair_level, verification_json=json.dumps(item.verification_check_ids, ensure_ascii=False),
-        duration_ms=item.duration_ms, error_code=item.error_code,
-        priority=item.priority, blocking=item.blocking,
-        repair_outcome_json=json.dumps(item.repair_outcome, ensure_ascii=False),
-    ) for item in payload.items]
+    report.items = item_rows
     db.add(report)
     device.last_seen = now_iso()
     db.commit()

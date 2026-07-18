@@ -221,9 +221,9 @@ def performance_checks(ctx: CheckContext) -> list[CheckResult]:
     memory = psutil.virtual_memory()
     disk = psutil.disk_usage(Path.home().anchor)
     rows = [
-        _result("performance.cpu", "电脑性能", Status.FAIL if cpu >= 95 else Status.WARNING if cpu >= 80 else Status.PASS, "CPU 实时占用", f"{cpu:.0f}%", evidence=[f"1 秒采样占用 {cpu:.0f}%"], diagnosis="CPU 负载正常" if cpu < 80 else "后台负载可能挤占直播编码资源", impact="持续高负载可能造成编码过载和掉帧。", solutions=[] if cpu < 80 else ["关闭非直播高占用程序后复检"], metrics={"percent": cpu}),
-        _result("performance.memory", "电脑性能", Status.FAIL if memory.percent >= 95 else Status.WARNING if memory.percent >= 85 else Status.PASS, "内存占用", f"{memory.percent:.0f}%", evidence=[f"可用 {memory.available / 2**30:.1f} GB"], diagnosis="可用内存正常" if memory.percent < 85 else "可用内存偏低", impact="内存不足可能引起直播软件卡顿或崩溃。", solutions=[] if memory.percent < 85 else ["关闭非直播程序"], metrics={"percent": memory.percent}),
-        _result("performance.disk", "电脑性能", Status.FAIL if disk.free / 2**30 < ctx.profile["min_free_disk_gb"] else Status.PASS, "系统盘空间", f"{disk.free / 2**30:.1f} GB", evidence=[f"要求至少 {ctx.profile['min_free_disk_gb']} GB"], diagnosis="磁盘空间充足" if disk.free / 2**30 >= ctx.profile["min_free_disk_gb"] else "系统盘空间不足", impact="空间不足会导致缓存、日志和录制失败。", solutions=["清理系统盘后复检"] if disk.free / 2**30 < ctx.profile["min_free_disk_gb"] else [], metrics={"free_gb": disk.free / 2**30}),
+        _result("performance.cpu", "电脑性能", Status.WARNING if cpu >= 80 else Status.PASS, "CPU 实时占用", f"{cpu:.0f}%", evidence=[f"1 秒采样占用 {cpu:.0f}%"], diagnosis="CPU 负载正常" if cpu < 80 else "后台负载可能挤占直播编码资源", impact="持续高负载可能造成编码过载和掉帧，仅作为兼容性参考。", solutions=[] if cpu < 80 else ["关闭非直播高占用程序后复检"], metrics={"percent": cpu}),
+        _result("performance.memory", "电脑性能", Status.WARNING if memory.percent >= 85 else Status.PASS, "内存占用", f"{memory.percent:.0f}%", evidence=[f"可用 {memory.available / 2**30:.1f} GB"], diagnosis="可用内存正常" if memory.percent < 85 else "可用内存偏低", impact="内存不足可能引起卡顿，仅作为兼容性参考。", solutions=[] if memory.percent < 85 else ["关闭非直播程序"], metrics={"percent": memory.percent}),
+        _result("performance.disk", "电脑性能", Status.WARNING if disk.free / 2**30 < ctx.profile["min_free_disk_gb"] else Status.PASS, "系统盘空间", f"{disk.free / 2**30:.1f} GB", evidence=[f"建议至少 {ctx.profile['min_free_disk_gb']} GB"], diagnosis="磁盘空间充足" if disk.free / 2**30 >= ctx.profile["min_free_disk_gb"] else "系统盘空间偏低", impact="空间偏低可能影响缓存或录制，仅作为参考。", solutions=["方便时清理系统盘"] if disk.free / 2**30 < ctx.profile["min_free_disk_gb"] else [], metrics={"free_gb": disk.free / 2**30}),
     ]
     try:
         gpu = powershell("(Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name) -join ' / '")
@@ -243,7 +243,7 @@ def device_checks(ctx: CheckContext) -> list[CheckResult]:
         camera = audio = -1
     rows = []
     for check_id, title, count, settings in (("devices.camera", "摄像头 / 采集卡", camera, "open_camera_settings"), ("devices.microphone", "麦克风 / 音频设备", audio, "open_microphone_settings")):
-        status = Status.PASS if count > 0 else Status.FAIL if count == 0 else Status.UNKNOWN
+        status = Status.PASS if count > 0 else Status.WARNING if count == 0 else Status.UNKNOWN
         rows.append(_result(check_id, "直播设备", status, title, f"发现 {count} 个" if count >= 0 else "枚举失败", evidence=[f"Windows 即插即用设备数量：{max(count, 0)}"], diagnosis="Windows 已识别设备" if count > 0 else "未发现设备；可能未连接、驱动异常或权限关闭" if count == 0 else "系统设备枚举失败", impact="视频设备异常会造成黑屏；音频设备异常会造成无声。", solutions=[] if count > 0 else ["检查连接和驱动", "打开 Windows 隐私权限设置后复检"], repair_id=settings if count <= 0 else "", repair_level="safe"))
     return rows
 

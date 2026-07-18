@@ -61,15 +61,15 @@ def test_homepage_content_is_admin_managed_and_protected(tmp_path):
 def test_v5_readiness_priorities_baseline_and_themes():
     blocked = CheckReport("device", "2.5.0", [CheckResult("network.throughput", "网络", Status.FAIL, "稳定上传")])
     blocked.finalize()
-    assert blocked.readiness_level == "NOT_READY" and blocked.blocking_count == 1
+    assert blocked.readiness_level == "READY_WITH_RISK" and blocked.blocking_count == 0
     incomplete = CheckReport("device", "2.5.0", [CheckResult("network.throughput", "网络", Status.UNKNOWN, "稳定上传")])
     incomplete.finalize()
-    assert incomplete.readiness_level == "INCOMPLETE"
+    assert incomplete.readiness_level == "READY" and incomplete.network_summary == "待核实"
     advisory = CheckReport("device", "2.5.0", [CheckResult("system.timezone", "系统", Status.WARNING, "时区")])
     advisory.finalize()
     assert advisory.readiness_level == "READY_WITH_RISK"
     payload = blocked.to_dict()
-    assert payload["schema_version"] == 5 and payload["items"][0]["priority"] == "BLOCKING"
+    assert payload["schema_version"] == 5 and payload["items"][0]["priority"] == "ADVISORY"
     delta = baseline_delta({"network_snapshot":{"network.throughput":{"upload_mbps":20}},"items":[]}, {"network_snapshot":{"network.throughput":{"upload_mbps":12}},"items":[]})
     assert delta["upload_mbps"]["change"] == 8
     assert set(THEMES) == {"obsidian", "cyber", "daylight"}

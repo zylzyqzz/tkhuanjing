@@ -4,7 +4,8 @@ import csv
 import io
 import json
 import shutil
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
+import statistics
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
@@ -147,7 +148,7 @@ def save_device(payload: DeviceIn, admin: dict = Depends(require_csrf), db: Sess
 
 
 @router.get("/reports")
-def reports(status: str = "", q: str = "", tag: str = "", limit: int = Query(200, ge=1, le=1000), _admin: dict = Depends(current_admin), db: Session = Depends(get_db)) -> dict:
+def reports(status: str = "", q: str = "", tag: str = "", user_id: int | None = None, ip: str = "", asn: str = "", provider: str = "", date_from: str = "", date_to: str = "", follow_up_status: str = "", limit: int = Query(200, ge=1, le=1000), _admin: dict = Depends(current_admin), db: Session = Depends(get_db)) -> dict:
     stmt = select(CheckReport).order_by(CheckReport.checked_at.desc())
     if status:
         if status in {"READY", "READY_WITH_RISK", "NOT_READY", "INCOMPLETE"}:
@@ -155,22 +156,35 @@ def reports(status: str = "", q: str = "", tag: str = "", limit: int = Query(200
         else:
             stmt = stmt.where(CheckReport.overall_status == status)
     if q:
-        stmt = stmt.where(or_(CheckReport.target_region_id.contains(q), CheckReport.device_id.contains(q)))
+        stmt = stmt.where(or_(CheckReport.target_region_id.contains(q), CheckReport.device_id.contains(q), CheckReport.customer_name.contains(q), CheckReport.room_name.contains(q)))
+    if date_from: stmt = stmt.where(CheckReport.checked_at >= date_from)
+    if date_to: stmt = stmt.where(CheckReport.checked_at <= date_to + "T23:59:59")
+    if user_id is not None:
+        device_ids = select(Device.device_id).where(Device.user_id == user_id)
+        stmt = stmt.where(CheckReport.device_id.in_(device_ids))
     fields = ["report_id", "device_id", "customer_name", "room_name", "run_mode", "target_region_id", "schema_version", "app_version", "checked_at", "overall_status", "conclusion", "readiness_level", "blocking_count", "high_risk_count", "test_mode", "uploaded_at"]
     result = []
-    for row in db.scalars(stmt.limit(limit)).all():
+    support_reports = {x.report_id for x in db.scalars(select(SupportCase).where(SupportCase.status == follow_up_status)).all()} if follow_up_status else set()
+    for row in db.scalars(stmt.limit(1000)).all():
         tags = json.loads(row.issue_tags_json or "[]")
         if tag and tag not in tags:
             continue
-        result.append(row_dict(row, fields) | {"issue_tags": tags})
-    return {"reports": result}
+        profile = json.loads(row.ip_profile_json or "{}")
+        row_ip, row_asn = str(profile.get("ip") or ""), str(profile.get("asn") or "")
+        row_provider = str(profile.get("isp") or profile.get("org") or "")
+        if ip and ip not in row_ip or asn and asn.lower() not in row_asn.lower() or provider and provider.lower() not in row_provider.lower(): continue
+        if follow_up_status and row.report_id not in support_reports: continue
+        result.append(row_dict(row, fields) | {"issue_tags": tags, "ip": row_ip, "asn": row_asn, "provider": row_provider,
+            "environment_summary": row.environment_summary, "network_summary": row.network_summary, "hardware_summary": row.hardware_summary, "next_action": row.next_action})
+    return {"reports": result[:limit]}
 
 
 @router.get("/report/{report_id}")
-def report(report_id: str, _admin: dict = Depends(current_admin), db: Session = Depends(get_db)) -> dict:
+def report(report_id: str, admin: dict = Depends(current_admin), db: Session = Depends(get_db)) -> dict:
     row = db.get(CheckReport, report_id)
     if not row:
         raise HTTPException(404, "报告不存在")
+    audit(db, admin["username"], "view_report", "report", report_id); db.commit()
     fields = ["report_id", "device_id", "run_mode", "target_region_id", "schema_version", "app_version", "checked_at", "overall_status", "conclusion", "readiness_level", "blocking_count", "high_risk_count", "test_mode"]
     item_fields = ["check_id", "category", "status", "title", "value", "reason", "action", "repairable", "diagnosis", "impact", "data_source", "confidence", "repair_id", "repair_level", "duration_ms", "error_code", "priority", "blocking"]
     items = []
@@ -195,7 +209,51 @@ def report(report_id: str, _admin: dict = Depends(current_admin), db: Session = 
         "baseline_delta": json.loads(row.baseline_delta_json or "{}"),
         "source_health": json.loads(row.source_health_json or "{}"),
         "issue_tags": json.loads(row.issue_tags_json or "[]"),
+        "environment_summary": row.environment_summary, "network_summary": row.network_summary,
+        "hardware_summary": row.hardware_summary, "next_action": row.next_action,
+        "ai_analysis": json.loads(row.ai_analysis_json or "{}"),
     }, "items": items}
+
+
+@router.delete("/report/{report_id}")
+def delete_report(report_id: str, admin: dict = Depends(require_csrf), db: Session = Depends(get_db)) -> dict:
+    row = db.get(CheckReport, report_id)
+    if not row: raise HTTPException(404, "报告不存在")
+    db.delete(row); audit(db, admin["username"], "delete_report", "report", report_id); db.commit()
+    return {"ok": True}
+
+
+@router.get("/providers")
+def providers(_admin: dict = Depends(current_admin), db: Session = Depends(get_db)) -> dict:
+    now = datetime.now(timezone.utc)
+    groups: dict[tuple[str, str, str, str], dict] = {}
+    for row in db.scalars(select(CheckReport).order_by(CheckReport.checked_at.desc()).limit(5000)).all():
+        profile = json.loads(row.ip_profile_json or "{}")
+        provider = str(profile.get("isp") or profile.get("org") or "待核实")
+        key = (provider, str(profile.get("asn") or ""), str(profile.get("country_code") or profile.get("country") or ""), str(profile.get("network_type") or "unknown"))
+        group = groups.setdefault(key, {"provider": key[0], "asn": key[1], "country": key[2], "network_type": key[3], "reports": [], "devices": set()})
+        group["reports"].append(row); group["devices"].add(row.device_id)
+    result = []
+    for group in groups.values():
+        uploads=[]; jitters=[]; latencies=[]; losses=[]
+        for row in group["reports"]:
+            snap=json.loads(row.network_snapshot_json or "{}"); speed=snap.get("network.throughput", {}); route=snap.get("network.target_route", {})
+            for target, key in ((uploads,"upload_mbps"),(jitters,"jitter_ms"),(latencies,"latency_ms")):
+                value=speed.get(key)
+                if isinstance(value,(int,float)): target.append(float(value))
+            loss=route.get("packet_loss_percent")
+            if isinstance(loss,(int,float)): losses.append(float(loss))
+        valid=len(uploads); confidence="high" if valid>=30 else "medium" if valid>=10 else "low"
+        samples_7d = samples_30d = 0; periods = {"00-08": 0, "08-18": 0, "18-24": 0}
+        for row in group["reports"]:
+            try:
+                checked = datetime.fromisoformat(row.checked_at.replace("Z", "+00:00")); checked = checked if checked.tzinfo else checked.replace(tzinfo=timezone.utc)
+                samples_7d += int(checked >= now - timedelta(days=7)); samples_30d += int(checked >= now - timedelta(days=30))
+                periods["00-08" if checked.hour < 8 else "08-18" if checked.hour < 18 else "18-24"] += 1
+            except ValueError: pass
+        advice="待核实" if valid<10 else "谨慎" if (statistics.median(jitters) if jitters else 0)>30 or (statistics.median(losses) if losses else 0)>1 else "适合"
+        result.append({k:v for k,v in group.items() if k not in {"reports","devices"}} | {"sample_count":len(group["reports"]),"valid_samples":valid,"unique_devices":len(group["devices"]),"samples_7d":samples_7d,"samples_30d":samples_30d,"time_periods":periods,"last_checked_at":group["reports"][0].checked_at,"median_upload_mbps":round(statistics.median(uploads),2) if uploads else None,"p95_upload_mbps":sorted(uploads)[max(0,round((len(uploads)-1)*.95))] if uploads else None,"median_jitter_ms":round(statistics.median(jitters),2) if jitters else None,"median_latency_ms":round(statistics.median(latencies),2) if latencies else None,"median_packet_loss":round(statistics.median(losses),2) if losses else None,"confidence":confidence,"advice":advice})
+    return {"providers": sorted(result,key=lambda x:x["sample_count"],reverse=True)}
 
 
 @router.get("/setup-reports")
@@ -336,8 +394,9 @@ def export_codes(_admin: dict = Depends(current_admin), db: Session = Depends(ge
 
 
 @router.get("/reports/export")
-def export_reports(_admin: dict = Depends(current_admin), db: Session = Depends(get_db)) -> StreamingResponse:
+def export_reports(admin: dict = Depends(current_admin), db: Session = Depends(get_db)) -> StreamingResponse:
     rows = db.scalars(select(CheckReport).order_by(CheckReport.checked_at.desc())).all()
+    audit(db, admin["username"], "export_reports", "report", details=f"count={len(rows)}"); db.commit()
     return csv_response("check-reports.csv", ["报告编号", "目标地区", "设备", "状态", "结论", "检查时间"], [[x.report_id, x.target_region_id, x.device_id, x.overall_status, x.conclusion, x.checked_at] for x in rows])
 
 
