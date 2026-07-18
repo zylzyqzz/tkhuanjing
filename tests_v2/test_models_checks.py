@@ -44,7 +44,7 @@ def test_network_checks_separates_local_gateway_and_target(monkeypatch):
 def test_report_precedence_and_schema():
     report = CheckReport("device", "2.3.0", [
         CheckResult("network.dns", "网络", Status.PASS, "DNS"),
-        CheckResult("devices.camera", "设备", Status.FAIL, "摄像头"),
+        CheckResult("network.throughput", "网络", Status.FAIL, "稳定上传"),
     ])
     report.finalize()
     assert report.overall_status == Status.FAIL
@@ -58,5 +58,15 @@ def test_report_precedence_and_schema():
 def test_warning_when_unknown_present():
     report = CheckReport("device", "2.3.0", [CheckResult("x", "客户端", Status.UNKNOWN, "测试")])
     report.finalize()
-    assert report.overall_status == Status.WARNING
-    assert report.readiness_level == "READY_WITH_RISK"
+    assert report.overall_status == Status.PASS
+    assert report.readiness_level == "READY"
+
+
+def test_missing_optional_camera_does_not_block_opening_stream():
+    report = CheckReport("device", "2.3.0", [
+        CheckResult("network.throughput", "网络", Status.PASS, "网速"),
+        CheckResult("devices.camera", "设备", Status.UNKNOWN, "摄像头"),
+    ])
+    report.finalize()
+    assert report.blocking_count == 0
+    assert report.readiness_level == "READY"

@@ -20,7 +20,7 @@ from .models import Admin, Device
 
 settings = get_settings()
 hasher = PasswordHasher()
-serializer = URLSafeTimedSerializer(settings.session_secret, salt="wd-admin-session-v2")
+serializer = URLSafeTimedSerializer(settings.session_secret, salt="tk-admin-session-v2")
 login_attempts: dict[str, deque[float]] = defaultdict(deque)
 
 
@@ -65,11 +65,11 @@ def make_session(username: str) -> tuple[str, str]:
     return token, csrf
 
 
-def current_admin(wd_session: str | None = Cookie(default=None)) -> dict:
-    if not wd_session:
+def current_admin(tk_session: str | None = Cookie(default=None)) -> dict:
+    if not tk_session:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请先登录")
     try:
-        payload = serializer.loads(wd_session, max_age=settings.session_hours * 3600)
+        payload = serializer.loads(tk_session, max_age=settings.session_hours * 3600)
         if datetime.fromisoformat(payload["expires"]) < datetime.now(timezone.utc):
             raise BadSignature("expired")
         return payload
@@ -124,4 +124,3 @@ def current_user(
     if not session_row:
         raise HTTPException(status_code=401, detail="登录已过期，请重新登录")
     return {"user_id": session_row.user_id, "phone": session_row.user.phone}
-

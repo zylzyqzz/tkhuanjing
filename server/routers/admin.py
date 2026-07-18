@@ -20,7 +20,7 @@ from ..security import clear_login_attempts, current_admin, make_session, rate_l
 from ..services import audit, create_codes, file_sha256
 
 
-router = APIRouter(prefix="/wd-api", tags=["admin"])
+router = APIRouter(prefix="/tk-api", tags=["admin"])
 settings = get_settings()
 
 
@@ -37,7 +37,7 @@ def login(payload: LoginRequest, request: Request, response: Response, db: Sessi
         raise HTTPException(status_code=401, detail="账号或密码错误")
     clear_login_attempts(ip)
     token, csrf = make_session(admin.username)
-    response.set_cookie("wd_session", token, httponly=True, samesite="strict", secure=settings.env == "production", max_age=settings.session_hours * 3600)
+    response.set_cookie("tk_session", token, httponly=True, samesite="strict", secure=settings.env == "production", max_age=settings.session_hours * 3600)
     audit(db, admin.username, "login", details=ip)
     db.commit()
     return {"ok": True, "csrf": csrf, "username": admin.username}
@@ -50,7 +50,7 @@ def session(admin: dict = Depends(current_admin)) -> dict:
 
 @router.post("/logout")
 def logout(response: Response, admin: dict = Depends(require_csrf)) -> dict:
-    response.delete_cookie("wd_session")
+    response.delete_cookie("tk_session")
     return {"ok": True}
 
 

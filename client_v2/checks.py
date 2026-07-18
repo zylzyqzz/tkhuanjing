@@ -17,6 +17,7 @@ from .api import ClientApi
 from .events import EventSink, emit
 from .models import CheckResult, Status
 from .network_intelligence import lookup_public_ip, measure_throughput, tls_probe
+from .provider_knowledge import assess_provider
 from .regions import RegionProfile
 from .streaming_config import discover_streaming_profiles
 
@@ -77,7 +78,7 @@ def ping_metrics(host: str, count: int = 8) -> tuple[float, float, float, int]:
 
 
 def _priority(check_id: str, status: Status) -> str:
-    if check_id in {"network.throughput", "devices.camera", "devices.microphone", "performance.encoder", "streaming.configuration"}:
+    if check_id == "network.throughput":
         return "BLOCKING"
     if check_id.startswith(("network.public_ip", "network.ip_quality", "network.target_route", "system.timezone", "system.region_consistency")):
         return "ADVISORY"
@@ -117,14 +118,16 @@ def network_checks(ctx: CheckContext) -> list[CheckResult]:
     ))
     clean = profile.get("cleanliness") or {}
     network_type = profile.get("network_type") or "unknown"
+    provider = assess_provider(profile)
+    provider_status = Status.WARNING if provider["level"] == "caution" else Status.PASS if provider["level"] == "suitable" else Status.UNKNOWN
     rows.append(_result(
-        "network.ip_quality", "网络环境", Status.PASS if clean and network_type not in ("hosting", "datacenter") else Status.UNKNOWN,
-        "IP 类型与纯净度", str(network_type if network_type != "unknown" else "数据不足"),
-        evidence=[f"服务商：{profile.get('isp') or '未识别'}", f"ASN：{profile.get('asn') or '未识别'}", f"情报源：{profile.get('source','未知')}"],
-        diagnosis="第三方情报未发现明显机房网络特征" if clean else "当前数据不足，不能武断判断为纯净家宽",
+        "network.ip_quality", "网络环境", provider_status,
+        "IP 服务商与线路类型", f"{provider['provider']} · {provider['asn']}",
+        evidence=[f"服务商：{provider['provider']}", f"ASN：{provider['asn']}", f"线路分类：{provider['category']}", f"情报源：{profile.get('source','未知')}"] + provider["evidence"],
+        diagnosis=provider["summary"],
         impact="机房、共享或高风险 IP 可能提高登录验证概率；纯净度只能作为辅助信息，不能承诺平台结果。",
         solutions=[] if clean else ["使用可信的独享住宅线路", "在服务入口进一步核验 IP 类型与历史"],
-        metrics={"cleanliness": clean, "suitability": profile.get("suitability", {})}, source=profile.get("source", "IP 情报服务"), confidence=profile.get("confidence", "low"),
+        metrics={"cleanliness": clean, "suitability": profile.get("suitability", {}), "provider_assessment": provider, "network_type": network_type}, source=profile.get("source", "IP 情报服务"), confidence=provider["confidence"],
     ))
 
     gateway = ""
@@ -183,25 +186,27 @@ def network_checks(ctx: CheckContext) -> list[CheckResult]:
     upload = speed.get("upload_mbps")
     download = speed.get("download_mbps")
     variation = speed.get("upload_variation_percent")
+    latency = speed.get("latency_ms")
+    jitter = speed.get("jitter_ms")
     stream_profiles = discover_streaming_profiles()
     bitrates = [x["bitrate_kbps"] for x in stream_profiles if x.get("bitrate_kbps")]
     bitrate = max(bitrates) if bitrates else None
-    required = bitrate / 1000 * float(ctx.profile["upload_multiplier"]) if bitrate else None
+    baseline_required = float(ctx.profile.get("min_upload_mbps", 8.0))
+    required = max(baseline_required, bitrate / 1000 * float(ctx.profile["upload_multiplier"])) if bitrate else baseline_required
     if upload is None:
         speed_status = Status.UNKNOWN
-    elif required is None:
-        speed_status = Status.UNKNOWN
     else:
-        speed_status = Status.PASS if upload >= required else Status.FAIL
-    evidence = [f"下载中位数：{download if download is not None else '未完成'} Mbps", f"稳定上传：{upload if upload is not None else '未完成'} Mbps", f"上传波动：{variation if variation is not None else '样本不足'}%"]
+        unstable = variation is not None and variation > 50
+        speed_status = Status.PASS if upload >= required and not unstable else Status.WARNING if upload >= max(5.0, required * .7) else Status.FAIL
+    evidence = [f"下载中位数：{download if download is not None else '未完成'} Mbps", f"稳定上传：{upload if upload is not None else '未完成'} Mbps", f"空载延迟：{latency if latency is not None else '未完成'} ms", f"抖动中位数：{jitter if jitter is not None else '未完成'} ms", f"上传波动：{variation if variation is not None else '样本不足'}%"]
     if bitrate:
         evidence.append(f"直播软件实测配置码率：{bitrate} Kbps，建议稳定上传 ≥ {required:.1f} Mbps")
     else:
-        evidence.append("未读取到直播软件码率，因此未使用虚构默认值判定")
+        evidence.append(f"未读取到直播软件码率，按通用直播稳定上传基线 {baseline_required:.1f} Mbps 判定")
     rows.append(_result(
         "network.throughput", "网络环境", speed_status, "上下行速度与直播承载", f"↓ {download or 0:.1f} / ↑ {upload or 0:.1f} Mbps",
         evidence=evidence,
-        diagnosis="当前线路满足已检测到的直播码率" if speed_status == Status.PASS and bitrate else "速度数据已测得，但未检测到直播软件码率，暂不做硬性开播结论" if required is None else "稳定上传低于当前直播码率的两倍",
+        diagnosis="当前线路满足直播上传与稳定性要求" if speed_status == Status.PASS else "上传基本可用但余量或稳定性不足，建议优化后开播" if speed_status == Status.WARNING else "稳定上传低于直播所需基线" if speed_status == Status.FAIL else "测速节点未返回足够数据",
         impact="稳定上传不足或波动过大会造成编码缓存增长、掉帧、卡顿或断流。",
         solutions=[] if speed_status == Status.PASS else ["关闭占用上传带宽的程序", "切换稳定线路", "在直播软件中降低码率后复检"], metrics=speed, source=speed.get("source", "Cloudflare Speed"),
     ))

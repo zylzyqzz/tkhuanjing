@@ -217,3 +217,10 @@ class UserProfileUpdate(BaseModel):
     email: str | None = Field(default=None, max_length=255)
     wechat_id: str | None = Field(default=None, max_length=80)
     platform_account: str | None = Field(default=None, max_length=120)
+
+    @field_validator("business_types")
+    @classmethod
+    def limit_business_types(cls, value: list[str] | None) -> list[str] | None:
+        if value is not None and (len(value) > 20 or any(len(item) > 80 for item in value)):
+            raise ValueError("业务类型数量或长度超出限制")
+        return value

@@ -13,6 +13,7 @@ PINGIP_STREAM = "https://pingip.cn/api/lookup/stream/me"
 CLOUDFLARE_TRACE = "https://www.cloudflare.com/cdn-cgi/trace"
 CLOUDFLARE_DOWN = "https://speed.cloudflare.com/__down"
 CLOUDFLARE_UP = "https://speed.cloudflare.com/__up"
+RDAP_IP = "https://rdap-bootstrap.arin.net/bootstrap/ip/{ip}"
 
 
 def parse_sse(text: str) -> dict[str, Any]:
@@ -87,6 +88,7 @@ def lookup_public_ip(client: httpx.Client | None = None) -> dict[str, Any]:
             errors.append(f"Cloudflare: {exc}")
         ip = trace.get("ip", "")
         geo: dict[str, Any] = {}
+        rdap: dict[str, Any] = {}
         if ip:
             try:
                 response = client.get(f"https://ipwho.is/{ip}")
@@ -94,14 +96,24 @@ def lookup_public_ip(client: httpx.Client | None = None) -> dict[str, Any]:
                 geo = response.json()
             except Exception as exc:
                 errors.append(f"GeoIP: {exc}")
+            try:
+                response = client.get(RDAP_IP.format(ip=ip))
+                response.raise_for_status()
+                rdap = response.json()
+            except Exception as exc:
+                errors.append(f"RDAP: {exc}")
+        connection = geo.get("connection", {}) if isinstance(geo.get("connection"), dict) else {}
+        network_type = connection.get("type") or "unknown"
         return {
             "ip": ip, "country_code": (geo.get("country_code") or trace.get("loc") or "").upper(),
             "country": geo.get("country", ""), "region": geo.get("region", ""), "city": geo.get("city", ""),
             "timezone": (geo.get("timezone") or {}).get("id", "") if isinstance(geo.get("timezone"), dict) else geo.get("timezone", ""),
-            "isp": geo.get("connection", {}).get("isp", "") if isinstance(geo.get("connection"), dict) else "",
-            "asn": geo.get("connection", {}).get("asn", "") if isinstance(geo.get("connection"), dict) else "",
-            "network_type": "unknown", "cleanliness": {}, "suitability": {},
-            "source": "Cloudflare + GeoIP fallback", "confidence": "low", "provider_status": "degraded",
+            "isp": connection.get("isp") or connection.get("org") or rdap.get("name", ""),
+            "org": connection.get("org") or rdap.get("name", ""),
+            "asn": connection.get("asn", ""), "asn_name": connection.get("org", ""),
+            "network_type": network_type, "connection_type": network_type,
+            "cleanliness": {}, "suitability": {}, "rdap_name": rdap.get("name", ""),
+            "source": "Cloudflare + IPWho + RDAP", "confidence": "medium" if connection else "low", "provider_status": "degraded",
             "errors": errors,
         }
     finally:
@@ -126,7 +138,16 @@ def measure_throughput(client: httpx.Client | None = None, samples: int = 3, sam
     up: list[float] = []
     errors: list[str] = []
     payload = b"0" * sample_bytes
+    latency: list[float] = []
     try:
+        for _ in range(max(5, samples * 2)):
+            try:
+                started = time.perf_counter()
+                response = client.get(CLOUDFLARE_DOWN, params={"bytes": 0})
+                response.raise_for_status()
+                latency.append((time.perf_counter() - started) * 1000)
+            except Exception as exc:
+                errors.append(f"latency: {exc}")
         for index in range(samples):
             try:
                 started = time.perf_counter()
@@ -150,12 +171,15 @@ def measure_throughput(client: httpx.Client | None = None, samples: int = 3, sam
                 errors.append(f"upload: {exc}")
                 if progress:
                     progress("upload", index + 1, samples, None)
+        jitter = [abs(latency[index] - latency[index - 1]) for index in range(1, len(latency))]
         return {
             "download_samples_mbps": [round(x, 2) for x in down],
             "upload_samples_mbps": [round(x, 2) for x in up],
             "download_mbps": round(statistics.median(down), 2) if down else None,
             "upload_mbps": round(min(up), 2) if up else None,
             "upload_variation_percent": round((max(up) - min(up)) / max(max(up), .001) * 100, 1) if len(up) > 1 else None,
+            "latency_ms": round(statistics.median(latency), 1) if latency else None,
+            "jitter_ms": round(statistics.median(jitter), 1) if jitter else None,
             "source": "Cloudflare Speed",
             "errors": errors,
         }

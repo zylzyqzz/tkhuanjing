@@ -16,7 +16,7 @@ class Status(StrEnum):
 
 SEVERITY = {Status.FAIL: 0, Status.WARNING: 1, Status.UNKNOWN: 2, Status.PASS: 3}
 PRIORITIES = {"BLOCKING", "HIGH_RISK", "ADVISORY", "INFORMATIONAL"}
-CRITICAL_CHECKS = {"network.throughput", "devices.camera", "devices.microphone", "performance.encoder", "streaming.configuration"}
+CRITICAL_CHECKS = {"network.throughput"}
 
 
 @dataclass(slots=True)
@@ -110,7 +110,7 @@ class CheckReport:
         elif critical_unknown:
             self.readiness_level, self.overall_status = "INCOMPLETE", Status.UNKNOWN
             self.conclusion = f"关键检测未完成 · 还有 {len(critical_unknown)} 项需要复检"
-        elif self.high_risk_count or advisory_risk or any(item.status == Status.UNKNOWN for item in self.items):
+        elif self.high_risk_count or advisory_risk:
             self.readiness_level, self.overall_status = "READY_WITH_RISK", Status.WARNING
             self.conclusion = f"可以尝试开播 · 存在 {self.high_risk_count or 1} 个明确风险"
         elif self.items:

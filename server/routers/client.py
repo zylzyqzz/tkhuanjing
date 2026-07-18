@@ -234,9 +234,13 @@ def auth_send_code(payload: SendCodeRequest, db: Session = Depends(get_db)) -> d
         raise HTTPException(status_code=429, detail="验证码发送过于频繁，请稍后再试")
     code = _gen_code(settings)
     expires_at = (now + timedelta(minutes=settings.verify_code_ttl_minutes)).isoformat()
-    db.add(VerificationCode(target=payload.target, code=code, purpose=payload.purpose, expires_at=expires_at))
+    verification = VerificationCode(target=payload.target, code=code, purpose=payload.purpose, expires_at=expires_at)
+    db.add(verification)
     db.commit()
-    send_verification_code(payload.target, code, payload.purpose)
+    if not send_verification_code(payload.target, code, payload.purpose):
+        db.delete(verification)
+        db.commit()
+        raise HTTPException(status_code=503, detail="验证码暂时无法发送，请稍后重试")
     result: dict = {"ok": True}
     if settings.env != "production":
         result["dev_code"] = code
@@ -247,7 +251,16 @@ def auth_send_code(payload: SendCodeRequest, db: Session = Depends(get_db)) -> d
 def auth_register(payload: UserRegisterRequest, db: Session = Depends(get_db)) -> dict:
     if db.scalar(select(User).where(User.phone == payload.phone)):
         raise HTTPException(status_code=409, detail="手机号已注册")
+    now = datetime.now(timezone.utc)
+    vc = db.scalar(
+        select(VerificationCode)
+        .where(VerificationCode.target == payload.email, VerificationCode.purpose == "register", VerificationCode.used == 0)
+        .order_by(VerificationCode.id.desc())
+    )
+    if vc is None or datetime.fromisoformat(vc.expires_at) <= now or vc.code != payload.code:
+        raise HTTPException(status_code=400, detail="验证码错误或已过期")
     user = User(phone=payload.phone, phone_country=payload.phone_country, password_hash=hasher.hash(payload.password), email=payload.email, status="active")
+    vc.used = 1
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -258,7 +271,7 @@ def auth_register(payload: UserRegisterRequest, db: Session = Depends(get_db)) -
 @router.post("/auth/login")
 def auth_login(payload: UserLoginRequest, db: Session = Depends(get_db)) -> dict:
     user = db.scalar(select(User).where(User.phone == payload.phone))
-    if user is None or not verify_password(payload.password, user.password_hash):
+    if user is None or user.status != "active" or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="手机号或密码错误")
     user.last_active_at = now_iso()
     db.commit()
@@ -270,7 +283,7 @@ def auth_login(payload: UserLoginRequest, db: Session = Depends(get_db)) -> dict
 def auth_forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)) -> dict:
     settings = get_settings()
     user = db.scalar(select(User).where(User.phone == payload.phone))
-    if user is not None:
+    if user is not None and user.email:
         code = _gen_code(settings)
         expires_at = (datetime.now(timezone.utc) + timedelta(minutes=settings.verify_code_ttl_minutes)).isoformat()
         db.add(VerificationCode(target=user.email, code=code, purpose="reset_password", expires_at=expires_at))

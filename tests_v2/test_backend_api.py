@@ -15,6 +15,7 @@ def build_client(tmp_path: Path) -> TestClient:
         "TK_DATA_DIR": str(tmp_path / "data"), "TK_ADMIN_PASSWORD": "Admin-Test-123!",
         "TK_SESSION_SECRET": "test-session-secret-at-least-32-characters",
         "TK_LICENSE_SECRET": "test-license-secret-at-least-32-characters",
+        "TK_DEV_VERIFY_CODE": "123456",
     })
     for name in list(sys.modules):
         if name == "server" or name.startswith("server."):
@@ -35,7 +36,7 @@ def test_client_registration_authorization_and_report(tmp_path):
         _, headers = register(client)
         assert client.get("/api/v1/client/profile", headers=headers).status_code == 200
         regions = client.get("/api/v1/client/regions").json()["regions"]
-        assert len(regions) == 12 and regions[0]["windows_timezone"]
+        assert len(regions) >= 12 and regions[0]["windows_timezone"]
         assert client.get("/api/v1/client/network-intelligence/status").json()["providers"]
         event = str(uuid.uuid4())
         first = client.post("/api/v1/client/authorize", headers=headers, json={"event_id": event})
@@ -65,6 +66,19 @@ def test_client_registration_authorization_and_report(tmp_path):
         assert detail["before_snapshot"]["timezone"] == "China Standard Time"
         assert client.get("/tk-api/setup-reports").json()["reports"][0]["report_id"] == report["report_id"]
         assert client.get("/tk-api/nodes/status").json()["nodes"]
+
+
+def test_user_registration_requires_a_valid_email_code(tmp_path):
+    with build_client(tmp_path) as client:
+        email = "customer@example.com"
+        sent = client.post("/api/v1/client/auth/send-code", json={"target": email, "purpose": "register"})
+        assert sent.status_code == 200 and sent.json()["dev_code"] == "123456"
+        payload = {"phone": "13800138000", "phone_country": "CN", "password": "StrongPass123", "password_confirm": "StrongPass123", "email": email, "code": "000000"}
+        assert client.post("/api/v1/client/auth/register", json=payload).status_code == 400
+        payload["code"] = "123456"
+        registered = client.post("/api/v1/client/auth/register", json=payload)
+        assert registered.status_code == 200 and registered.json()["token"]
+        assert client.post("/api/v1/client/auth/register", json=payload).status_code == 409
 
 
 def test_admin_csrf_codes_and_audit(tmp_path):

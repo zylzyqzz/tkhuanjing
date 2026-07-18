@@ -1,4 +1,5 @@
 from client_v2.network_intelligence import lookup_public_ip, measure_throughput, parse_sse
+from client_v2.provider_knowledge import assess_provider
 from client_v2.streaming_config import discover_obs_profiles, discover_tiktok_profiles
 
 
@@ -32,6 +33,15 @@ def test_speed_returns_raw_samples():
     result = measure_throughput(Client(), samples=2, sample_bytes=1000)
     assert len(result["download_samples_mbps"]) == 2
     assert len(result["upload_samples_mbps"]) == 2
+    assert result["latency_ms"] is not None
+
+
+def test_provider_knowledge_distinguishes_access_and_hosting_without_absolute_claims():
+    access = assess_provider({"isp": "Example Fiber Communications", "asn": 123, "network_type": "Cable/DSL"})
+    hosting = assess_provider({"isp": "Example Cloud Hosting", "asn": "AS456", "network_type": "hosting"})
+    assert access["level"] == "suitable" and access["asn"] == "AS123"
+    assert hosting["level"] == "caution"
+    assert "不是账号风控" in hosting["disclaimer"]
 
 
 def test_streaming_profiles_are_read_from_real_files(tmp_path):

@@ -13,6 +13,28 @@ class RegionProfile:
     culture: str
     group: str
 
+    @property
+    def probes(self) -> tuple[str, ...]:
+        """Stable HTTPS targets used for comparative route checks.
+
+        The expanded V2.9 region catalog no longer stores per-city probes.  Keep
+        the targets regional where practical and always include two independent
+        public networks so one provider outage cannot invalidate the module.
+        """
+        regional = {
+            "north_america": "ec2.us-west-2.amazonaws.com",
+            "europe": "ec2.eu-west-1.amazonaws.com",
+            "southeast_asia": "ec2.ap-southeast-1.amazonaws.com",
+            "east_asia": "ec2.ap-northeast-1.amazonaws.com",
+            "middle_east": "ec2.me-central-1.amazonaws.com",
+            "south_america": "ec2.sa-east-1.amazonaws.com",
+            "oceania": "ec2.ap-southeast-2.amazonaws.com",
+            "south_asia": "ec2.ap-south-1.amazonaws.com",
+            "africa": "ec2.af-south-1.amazonaws.com",
+            "central_asia": "ec2.eu-central-1.amazonaws.com",
+        }.get(self.group, "www.cloudflare.com")
+        return regional, "www.cloudflare.com", "www.tiktok.com"
+
 
 REGIONS: tuple[RegionProfile, ...] = (
     # 北美 — 14 个地区

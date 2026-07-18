@@ -245,7 +245,7 @@ class User(Base):
     created_at: Mapped[str] = mapped_column(String(40), default=now_iso)
     last_active_at: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(20), default="active", index=True)
-    sessions: Mapped[list["UserSession"]] = relationship(cascade="all, delete-orphan")
+    sessions: Mapped[list["UserSession"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class UserSession(Base):

@@ -41,7 +41,7 @@ def test_v4_environment_report_contract():
 
 def test_all_regions_have_three_probes():
     from client_v2.regions import REGIONS
-    assert len(REGIONS) == 12
+    assert len(REGIONS) >= 12
     assert all(len(region.probes) >= 3 for region in REGIONS)
 
 

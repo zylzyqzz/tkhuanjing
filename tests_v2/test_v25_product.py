@@ -52,14 +52,14 @@ def test_homepage_content_is_admin_managed_and_protected(tmp_path):
         current.update({"product_name": "????????", "product_intro": "????????????", "product_faq": "????????\n????????"})
         assert client.post("/tk-api/homepage", headers=headers, json={"values": current}).status_code == 200
         repaired_home = client.get("/").text
-        assert "维度 TikTok 直播开播助手" in repaired_home
+        assert "VD开播助手" in repaired_home
         assert "为什么每天开播前都要检查" in repaired_home
         invalid = client.post("/tk-api/homepage", headers=headers, json={"values":{"unknown":"x"}})
         assert invalid.status_code == 422
 
 
 def test_v5_readiness_priorities_baseline_and_themes():
-    blocked = CheckReport("device", "2.5.0", [CheckResult("devices.camera", "设备", Status.FAIL, "摄像头")])
+    blocked = CheckReport("device", "2.5.0", [CheckResult("network.throughput", "网络", Status.FAIL, "稳定上传")])
     blocked.finalize()
     assert blocked.readiness_level == "NOT_READY" and blocked.blocking_count == 1
     incomplete = CheckReport("device", "2.5.0", [CheckResult("network.throughput", "网络", Status.UNKNOWN, "稳定上传")])
