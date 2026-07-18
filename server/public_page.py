@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import html
-from datetime import datetime
 
 from .models import Release
 
@@ -23,45 +22,465 @@ def _safe_text(value: str | None, fallback: str) -> str:
     return text
 
 
+CSS = """
+:root{
+    --bg:#050a13; --panel:#0a141f; --panel-2:#0d1926;
+    --line:#152840; --line-soft:#0f1c2f;
+    --text:#e6eef9; --muted:#7c8ea6; --dim:#556277;
+    --blue:#4ea1ff; --cyan:#4cd0d6; --gold:#f2c77d; --green:#5be0a4;
+    --radius-lg:18px; --radius:14px; --radius-sm:10px;
+    --shadow:0 22px 60px -24px rgba(0,0,0,.75);
+    --wrap:1180px;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);
+    font:16px/1.7 Inter,"PingFang SC","Microsoft YaHei UI",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;overflow-x:hidden}
+canvas#fx{position:fixed;inset:0;z-index:-2}
+.gridbg{position:fixed;inset:0;z-index:-1;opacity:.06;pointer-events:none;
+    background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+    background-size:56px 56px;mask-image:linear-gradient(#000,transparent 92%)}
+body:after{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background:radial-gradient(70% 45% at 78% 8%,rgba(78,161,255,.14),transparent 60%),
+               radial-gradient(60% 40% at 12% 88%,rgba(242,199,125,.08),transparent 55%),
+               linear-gradient(180deg,transparent,rgba(3,7,14,.9) 90%)}
+a{color:inherit;text-decoration:none}
+img{max-width:100%;display:block}
+
+/* Nav */
+nav{position:sticky;top:0;z-index:20;height:68px;display:flex;align-items:center;
+    padding:0 32px;background:rgba(5,10,19,.72);
+    backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    border-bottom:1px solid var(--line-soft)}
+nav .inner{width:100%;max-width:var(--wrap);margin:0 auto;
+    display:flex;align-items:center;justify-content:space-between;gap:20px}
+.brand{display:inline-flex;align-items:center;gap:12px;
+    font-weight:800;font-size:17px;letter-spacing:.3px;color:var(--text)}
+.brand i{display:inline-grid;place-items:center;width:34px;height:34px;
+    border-radius:10px;font-style:normal;font-size:15px;font-weight:900;
+    background:linear-gradient(135deg,var(--blue),var(--cyan));
+    color:var(--bg);box-shadow:0 8px 24px -6px rgba(78,161,255,.55)}
+.nav-links{display:flex;align-items:center;gap:28px;color:var(--muted);font-size:14px}
+.nav-links a{transition:color .2s}
+.nav-links a:hover{color:var(--text)}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    padding:12px 22px;border-radius:var(--radius-sm);
+    font-weight:700;font-size:14px;letter-spacing:.3px;
+    cursor:pointer;transition:transform .2s,box-shadow .2s,background .2s,border-color .2s;
+    border:1px solid transparent;white-space:nowrap}
+.btn-primary{color:#051224;background:linear-gradient(120deg,var(--blue),var(--cyan));
+    box-shadow:0 10px 28px -10px rgba(78,161,255,.7)}
+.btn-primary:hover{transform:translateY(-2px);box-shadow:0 18px 40px -12px rgba(78,161,255,.85)}
+.btn-primary.disabled{filter:grayscale(1) brightness(.7);pointer-events:none}
+.btn-ghost{color:var(--text);border-color:var(--line);background:rgba(255,255,255,.02)}
+.btn-ghost:hover{border-color:var(--blue);background:rgba(78,161,255,.06)}
+.btn-lg{padding:15px 28px;font-size:15px}
+
+/* Hero */
+.hero{max-width:var(--wrap);margin:0 auto;padding:88px 32px 56px;
+    display:grid;grid-template-columns:1.1fr .9fr;gap:64px;align-items:center}
+.eyebrow{display:inline-flex;align-items:center;gap:8px;
+    padding:6px 14px;border-radius:999px;
+    border:1px solid rgba(78,161,255,.28);background:rgba(78,161,255,.06);
+    color:var(--cyan);font-size:12px;font-weight:700;letter-spacing:1.2px}
+.eyebrow .dot{width:6px;height:6px;border-radius:50%;background:var(--green);
+    box-shadow:0 0 12px var(--green)}
+h1{font-size:60px;line-height:1.08;letter-spacing:-1.5px;margin:22px 0 20px;font-weight:800}
+h1 em{font-style:normal;background:linear-gradient(90deg,#fff 15%,var(--blue) 60%,var(--gold));
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+.lead{font-size:17px;line-height:1.75;color:var(--muted);max-width:560px;margin:0 0 32px}
+.cta-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.cta-hint{color:var(--dim);font-size:13px;margin-top:18px}
+
+/* Hero visual */
+.core{position:relative;aspect-ratio:1;min-height:380px;display:grid;place-items:center}
+.orbit{position:absolute;border:1px dashed rgba(78,161,255,.22);border-radius:50%;
+    animation:spin 24s linear infinite}
+.o1{width:100%;height:100%}
+.o2{width:74%;height:74%;animation-duration:18s;animation-direction:reverse;
+    border-style:solid;border-color:rgba(76,208,214,.18)}
+.o3{width:50%;height:50%;animation-duration:30s}
+.orbit:before{content:'';position:absolute;width:8px;height:8px;border-radius:50%;
+    background:var(--blue);top:-4px;left:50%;box-shadow:0 0 16px var(--blue)}
+.chip{position:relative;width:42%;aspect-ratio:1;
+    border:1px solid rgba(78,161,255,.35);border-radius:22px;
+    display:grid;place-items:center;text-align:center;
+    background:linear-gradient(150deg,rgba(20,38,63,.9),rgba(10,20,31,.9));
+    box-shadow:inset 0 0 40px rgba(78,161,255,.14),0 20px 60px -20px rgba(0,0,0,.8);
+    font-weight:800;font-size:15px;letter-spacing:.5px;line-height:1.5}
+.chip small{display:block;color:var(--cyan);font-size:11px;
+    letter-spacing:2px;margin-bottom:6px;font-weight:700}
+
+/* Trust strip */
+.trust{max-width:var(--wrap);margin:0 auto;padding:0 32px 12px}
+.trust-inner{display:grid;grid-template-columns:repeat(4,1fr);
+    border:1px solid var(--line-soft);border-radius:var(--radius);
+    background:linear-gradient(180deg,var(--panel),var(--panel-2));overflow:hidden}
+.trust-cell{padding:18px 22px;display:flex;align-items:center;gap:12px;
+    border-right:1px solid var(--line-soft);font-size:13px;color:var(--muted)}
+.trust-cell:last-child{border-right:0}
+.trust-cell i{font-style:normal;font:800 11px/1 monospace;color:var(--blue);
+    padding:5px 8px;border-radius:6px;background:rgba(78,161,255,.08)}
+.trust-cell b{color:var(--text);font-weight:700}
+
+/* Sections */
+section.block{max-width:var(--wrap);margin:0 auto;padding:72px 32px}
+.section-head{display:flex;align-items:flex-end;justify-content:space-between;
+    gap:32px;margin-bottom:36px}
+.section-head p{color:var(--muted);max-width:480px;margin:0}
+h2{font-size:34px;line-height:1.2;letter-spacing:-.8px;margin:14px 0 0;font-weight:800}
+
+/* Pricing tiers */
+.tiers{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.tier{padding:32px 30px;border:1px solid var(--line);
+    background:linear-gradient(180deg,var(--panel),var(--panel-2));
+    border-radius:var(--radius-lg);position:relative;
+    transition:transform .25s,border-color .25s,box-shadow .25s}
+.tier:hover{transform:translateY(-4px);border-color:rgba(78,161,255,.4);box-shadow:var(--shadow)}
+.tier .tag{font:700 11px/1 monospace;letter-spacing:2px;color:var(--blue);text-transform:uppercase}
+.tier .price{font:800 32px/1 Inter,sans-serif;color:var(--text);margin:14px 0 6px}
+.tier .price small{font-size:14px;color:var(--muted);font-weight:500;margin-left:6px}
+.tier .desc{color:var(--muted);margin:0 0 8px;font-size:14px}
+.tier ul{list-style:none;padding:0;margin:16px 0 0}
+.tier li{padding:6px 0 6px 22px;color:var(--text);font-size:14px;position:relative}
+.tier li:before{content:'✓';position:absolute;left:0;top:6px;
+    color:var(--green);font-weight:800;font-size:12px}
+.tier.featured{border-color:rgba(242,199,125,.45);
+    background:linear-gradient(180deg,rgba(242,199,125,.06),var(--panel-2));
+    box-shadow:0 30px 80px -30px rgba(242,199,125,.25)}
+.tier.featured .tag{color:var(--gold)}
+.tier.featured .badge{position:absolute;top:-12px;right:22px;
+    padding:5px 12px;font-size:11px;font-weight:800;letter-spacing:1.5px;
+    color:#1a1408;background:var(--gold);border-radius:999px}
+
+/* Dual mode */
+.modes{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+.mode{padding:40px 36px;border:1px solid var(--line);background:var(--panel);
+    border-radius:var(--radius-lg);position:relative;overflow:hidden;
+    transition:transform .25s,border-color .25s;min-height:240px}
+.mode:hover{transform:translateY(-3px);border-color:rgba(78,161,255,.4)}
+.mode strong{font:700 12px/1 monospace;letter-spacing:2px;color:var(--blue)}
+.mode.gold strong{color:var(--gold)}
+.mode h3{font-size:26px;margin:14px 0 12px;letter-spacing:-.4px}
+.mode p{color:var(--muted);margin:0;max-width:92%}
+.mode:after{content:'';position:absolute;width:220px;height:220px;
+    right:-60px;top:-80px;border-radius:50%;filter:blur(6px);
+    background:radial-gradient(circle,rgba(78,161,255,.18),transparent 60%)}
+.mode.gold:after{background:radial-gradient(circle,rgba(242,199,125,.18),transparent 60%)}
+
+/* Capabilities grid */
+.caps{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+.cap{padding:26px 24px;border:1px solid var(--line);background:var(--panel);
+    border-radius:var(--radius);transition:border-color .25s,transform .25s;min-height:160px}
+.cap:hover{border-color:rgba(78,161,255,.4);transform:translateY(-2px)}
+.cap span{display:block;font:800 26px/1 monospace;color:var(--line)}
+.cap h3{font-size:16px;margin:16px 0 6px;letter-spacing:-.1px}
+.cap p{color:var(--muted);margin:0;font-size:13px}
+
+/* Flow */
+.flow{list-style:none;padding:0;margin:0;display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+.flow li{padding:22px 20px;background:var(--panel);border:1px solid var(--line);
+    border-top:2px solid var(--blue);border-radius:0 0 var(--radius) var(--radius)}
+.flow b{display:block;font:800 12px/1 monospace;color:var(--gold);letter-spacing:2px;margin-bottom:10px}
+.flow span{color:var(--text);font-size:14px;font-weight:600}
+
+/* Sample report */
+.report{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;
+    padding:28px;border:1px solid var(--line);border-radius:var(--radius-lg);
+    background:linear-gradient(180deg,var(--panel),var(--panel-2))}
+.metric{padding:20px;border-radius:var(--radius);
+    background:rgba(255,255,255,.015);border:1px solid var(--line-soft)}
+.metric span{display:block;color:var(--muted);font-size:12px;letter-spacing:.5px}
+.metric b{display:block;font-size:22px;margin-top:8px;font-weight:800}
+.metric b.good{color:var(--green)}
+
+/* Release card */
+.release{display:flex;align-items:center;justify-content:space-between;
+    gap:32px;padding:34px 36px;border:1px solid var(--line);
+    background:linear-gradient(120deg,var(--panel),var(--panel-2));border-radius:var(--radius-lg)}
+.release h3{font-size:32px;margin:6px 0 4px;letter-spacing:-.5px}
+.release .meta{color:var(--muted);font-size:13px;line-height:1.7}
+
+/* FAQ */
+.faq{display:grid;gap:10px}
+details{padding:20px 24px;border:1px solid var(--line);
+    background:var(--panel);border-radius:var(--radius);transition:border-color .2s}
+details[open]{border-color:rgba(78,161,255,.35)}
+summary{cursor:pointer;font-weight:700;list-style:none;
+    display:flex;align-items:center;justify-content:space-between;gap:20px}
+summary::-webkit-details-marker{display:none}
+summary:after{content:'+';color:var(--muted);font-size:22px;
+    font-weight:400;transition:transform .25s;line-height:1}
+details[open] summary:after{transform:rotate(45deg)}
+details p{color:var(--muted);margin:12px 0 0}
+
+/* Footer */
+footer{max-width:var(--wrap);margin:40px auto 80px;padding:32px;
+    border-top:1px solid var(--line);color:var(--muted);font-size:13px;line-height:1.8}
+footer b{display:block;color:var(--text);margin-bottom:8px;font-weight:700;letter-spacing:.2px}
+footer .foot-links{margin-top:16px;display:flex;gap:20px;flex-wrap:wrap}
+footer .foot-links a{color:var(--dim)}
+footer .foot-links a:hover{color:var(--blue)}
+
+/* Sticky mobile CTA */
+.sticky{display:none}
+
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Responsive */
+@media(max-width:960px){
+    h1{font-size:44px}
+    .hero{grid-template-columns:1fr;gap:40px;padding-top:60px}
+    .core{min-height:320px;max-width:400px;margin:0 auto}
+    .caps{grid-template-columns:repeat(2,1fr)}
+    .modes,.tiers{grid-template-columns:1fr}
+    .flow{grid-template-columns:1fr}
+    .report{grid-template-columns:repeat(2,1fr)}
+    .release{flex-direction:column;align-items:flex-start}
+    .trust-inner{grid-template-columns:repeat(2,1fr)}
+    .trust-cell:nth-child(2){border-right:0}
+    .nav-links a:not(.btn){display:none}
+}
+@media(max-width:560px){
+    h1{font-size:36px}
+    section.block{padding:48px 24px}
+    .hero{padding:48px 24px 40px}
+    .modes,.caps,.tiers,.report{grid-template-columns:1fr}
+    .trust-inner{grid-template-columns:1fr}
+    .trust-cell{border-right:0;border-bottom:1px solid var(--line-soft)}
+    .trust-cell:last-child{border-bottom:0}
+    .sticky{display:block;position:fixed;left:16px;right:16px;bottom:16px;z-index:30}
+    .sticky .btn{width:100%}
+    nav .btn{padding:10px 16px;font-size:13px}
+}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}canvas{display:none}}
+"""
+
+
 def render_home(settings: dict[str, str], release: Release | None) -> str:
     esc = html.escape
-    name = _safe_text(settings.get("product_name"), "维度 TikTok 直播开播助手")
+    name = _safe_text(settings.get("product_name"), "VD开播助手")
     title = _safe_text(settings.get("home_hero_title"), "开播前，先检查")
-    subtitle = _safe_text(settings.get("home_hero_subtitle"), "让每一次 TikTok 电脑直播，从准备充分开始。")
-    intro = _safe_text(settings.get("product_intro"), "面向 TikTok／跨境电脑直播公司和工作室的开播前技术准备度检测工具。")
-    default_features = ["IP 与目标地区", "网络质量与真实测速", "Windows 直播环境", "电脑性能与后台占用", "GPU 与硬件编码器", "直播设备与插件", "直播软件与客户端完整性"]
+    subtitle = _safe_text(settings.get("home_hero_subtitle"), "让每一次 TikTok 电脑直播，从技术准备充分开始。")
+    intro = _safe_text(settings.get("product_intro"), "面向 TikTok / 跨境电脑直播公司和工作室的开播前技术准备度检测工具。")
+
+    default_features = [
+        "IP 与目标地区", "网络质量与真实测速", "Windows 直播环境",
+        "电脑性能与后台占用", "GPU 与硬件编码器",
+        "直播设备与插件", "直播软件与客户端完整性",
+    ]
     features = _lines(settings.get("product_features", ""), default_features)
     if len(features) != 7:
         features = default_features
-    steps = _lines(settings.get("home_steps", ""), ["发现真实问题", "判断问题来源", "安全处理或给出方案", "自动复检", "判断能否开播"])
-    faq = _lines(_safe_text(settings.get("product_faq"), "为什么每天开播前都要检查？\n提前发现网络波动、设备占用、编码异常和系统配置变化。\n检测通过是否代表平台一定允许开播？\n不是，本工具只判断电脑、网络、设备和直播软件的技术准备情况。"), [])
+    steps = _lines(settings.get("home_steps", ""),
+                   ["发现真实问题", "判断问题来源", "安全处理或给出方案", "自动复检", "判断能否开播"])
+
+    faq_raw = _safe_text(settings.get("product_faq"),
+        "为什么每天开播前都要检查？\n提前发现网络波动、设备占用、编码异常和系统配置变化。\n"
+        "检测通过是否代表平台一定允许开播？\n不是，本工具只判断电脑、网络、设备和直播软件的技术准备情况。\n"
+        "软件收费吗？\n完全免费。注册即送 3 天完整功能，填写真实资料后添加客服微信可领取永久使用权。")
+    faq = _lines(faq_raw, [])
+
     version = release.version if release else "尚未发布"
     size = f"{release.file_size / 1048576:.1f} MB" if release and release.file_size else "--"
     date = (release.created_at or "")[:10] if release else "--"
-    download_class = "download" if release else "download disabled"
-    download_href = "/download/latest" if release else "#unavailable"
-    feature_html = "".join(f"<article class='cap'><i></i><span>{index:02d}</span><h3>{esc(item)}</h3><p>真实采样 · 明确证据 · 可复检</p></article>" for index, item in enumerate(features[:7], 1))
-    step_html = "".join(f"<li><b>{index:02d}</b><span>{esc(item)}</span></li>" for index, item in enumerate(steps[:5], 1))
-    faq_pairs = [(faq[index], faq[index + 1] if index + 1 < len(faq) else "软件会展示检测证据、影响与下一步处理建议。") for index in range(0, min(len(faq), 8), 2)]
-    faq_html = "".join(f"<details><summary>{esc(question)}</summary><p>{esc(answer)}</p></details>" for question, answer in faq_pairs)
-    trust_html = "".join(f"<span><i>{icon}</i>{text}</span>" for icon, text in (("01", "真实网络采样"), ("02", "七组开播检查"), ("03", "安全修复与复检"), ("04", "不读取账号数据")))
-    return f"""<!doctype html><html lang='zh-CN'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
-<title>{esc(name)}｜开播前技术准备度检测</title><meta name='description' content='{esc(intro)}'><style>
-:root{{--bg:#030812;--panel:#091522;--line:#173552;--text:#eef7ff;--muted:#7f96b0;--blue:#49b8ff;--cyan:#55ead6;--gold:#efb65d;--green:#55dda2}}*{{box-sizing:border-box}}html{{scroll-behavior:smooth}}body{{margin:0;background:var(--bg);color:var(--text);font:15px/1.7 Inter,'Microsoft YaHei UI',sans-serif;overflow-x:hidden}}canvas{{position:fixed;inset:0;z-index:-2}}body:after{{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(circle at 72% 15%,#154d7944,transparent 32%),radial-gradient(circle at 25% 75%,#81571422,transparent 28%),linear-gradient(#040b15dd,#030812f5)}}.gridbg{{position:fixed;inset:0;z-index:-1;opacity:.16;background-image:linear-gradient(#4ca8e811 1px,transparent 1px),linear-gradient(90deg,#4ca8e811 1px,transparent 1px);background-size:52px 52px;mask-image:linear-gradient(#000,transparent 90%)}}nav{{height:72px;display:flex;align-items:center;justify-content:space-between;max-width:1240px;margin:auto;padding:0 26px;border-bottom:1px solid #ffffff0c}}.brand{{font-weight:900;letter-spacing:.5px}}.brand i{{display:inline-grid;place-items:center;width:34px;height:34px;margin-right:10px;border-radius:11px;background:linear-gradient(135deg,var(--blue),var(--cyan));color:#03101c;font-style:normal;box-shadow:0 0 28px #41b9ff55}}a{{color:inherit}}.download{{display:inline-flex;align-items:center;justify-content:center;gap:10px;padding:13px 22px;border-radius:12px;text-decoration:none;font-weight:900;color:#03101b;background:linear-gradient(110deg,var(--blue),var(--cyan));box-shadow:0 12px 35px #228dd744;transition:.25s}}.download:hover{{transform:translateY(-2px);box-shadow:0 17px 44px #35b6e966}}.download.disabled{{filter:grayscale(1);pointer-events:none}}.hero{{max-width:1240px;min-height:650px;margin:auto;padding:82px 26px 60px;display:grid;grid-template-columns:1.05fr .95fr;gap:62px;align-items:center}}.eyebrow{{display:inline-flex;border:1px solid #3fa5df66;background:#0d2d443d;color:#76d5ff;border-radius:99px;padding:6px 13px;font-size:12px;font-weight:800;letter-spacing:1px}}h1{{font-size:64px;line-height:1.05;margin:22px 0 18px;letter-spacing:-3px}}h1 em{{font-style:normal;background:linear-gradient(90deg,#fff 15%,var(--blue),var(--gold));color:transparent;background-clip:text}}.lead{{font-size:19px;color:#9db0c6;max-width:650px}}.actions{{display:flex;gap:14px;align-items:center;margin-top:30px}}.actions small{{color:var(--muted)}}.core{{position:relative;min-height:470px;display:grid;place-items:center}}.orbit{{position:absolute;border:1px solid #42aee733;border-radius:50%;animation:spin 18s linear infinite}}.o1{{width:410px;height:410px}}.o2{{width:310px;height:310px;animation-direction:reverse;animation-duration:13s}}.o3{{width:210px;height:210px}}.orbit:before{{content:'';position:absolute;width:10px;height:10px;border-radius:50%;background:var(--blue);top:-5px;left:50%;box-shadow:0 0 24px var(--blue)}}.chip{{position:relative;width:180px;height:180px;border:1px solid #60ceff77;border-radius:34px;display:grid;place-items:center;text-align:center;background:linear-gradient(145deg,#112b43ee,#07121fee);box-shadow:0 0 80px #279bd733,inset 0 0 36px #45baff22;transform:rotate(45deg)}}.chip b{{transform:rotate(-45deg);font-size:20px}}.pulse{{position:absolute;width:240px;height:240px;border-radius:50%;border:1px solid #48d9ca55;animation:pulse 2.6s ease-out infinite}}section.block{{max-width:1240px;margin:0 auto;padding:80px 26px}}.section-head{{display:flex;align-items:end;justify-content:space-between;gap:30px;margin-bottom:32px}}h2{{font-size:36px;margin:0;letter-spacing:-1px}}.section-head p{{color:var(--muted);max-width:560px}}.modes{{display:grid;grid-template-columns:1fr 1fr;gap:20px}}.mode,.cap,.report,.version-card,details{{border:1px solid #6aa9df2d;background:linear-gradient(145deg,#0d2034dd,#07111ddd);border-radius:20px;box-shadow:0 20px 70px #0005}}.mode{{padding:34px;position:relative;overflow:hidden}}.mode:after{{content:'';position:absolute;width:170px;height:170px;right:-55px;top:-60px;border-radius:50%;background:#3eaafa20;filter:blur(4px)}}.mode.gold:after{{background:#efb45b25}}.mode strong{{font-size:12px;color:var(--blue);letter-spacing:2px}}.mode.gold strong{{color:var(--gold)}}.mode h3{{font-size:25px;margin:13px 0 7px}}.mode p,.cap p{{color:var(--muted)}}.caps{{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}}.cap{{padding:24px;min-height:160px;position:relative;transition:.25s}}.cap:hover{{transform:translateY(-4px);border-color:#5bc7ff77}}.cap span{{color:#345b78;font:900 35px/1 monospace}}.cap h3{{margin:18px 0 0}}.flow{{list-style:none;padding:0;margin:0;display:grid;grid-template-columns:repeat(5,1fr);gap:12px}}.flow li{{padding:22px 18px;border-top:2px solid var(--blue);background:#071522aa;border-radius:0 0 14px 14px}}.flow b{{display:block;color:var(--gold);font-family:monospace;margin-bottom:12px}}.report{{padding:30px;display:grid;grid-template-columns:repeat(4,1fr);gap:12px}}.metric{{padding:18px;border-radius:14px;background:#06101c;border:1px solid #214261}}.metric span{{display:block;color:var(--muted);font-size:12px}}.metric b{{display:block;font-size:24px;margin-top:7px}}.metric b.good{{color:var(--green)}}.version-card{{padding:34px;display:flex;justify-content:space-between;align-items:center;gap:30px}}.version-card h3{{font-size:30px;margin:5px 0}}.meta{{color:var(--muted)}}.faq{{display:grid;gap:10px}}details{{padding:18px 22px}}summary{{cursor:pointer;font-weight:700}}details p{{color:var(--muted)}}footer{{max-width:1240px;margin:30px auto 100px;padding:34px 26px;border-top:1px solid #17304c;color:#7289a4}}.sticky{{position:fixed;right:24px;bottom:22px;z-index:5}}@keyframes spin{{to{{transform:rotate(360deg)}}}}@keyframes pulse{{0%{{transform:scale(.7);opacity:.9}}100%{{transform:scale(1.55);opacity:0}}}}@media(max-width:900px){{h1{{font-size:45px}}.hero{{grid-template-columns:1fr;padding-top:55px}}.core{{min-height:400px}}.caps{{grid-template-columns:repeat(2,1fr)}}.flow{{grid-template-columns:1fr}}.report{{grid-template-columns:repeat(2,1fr)}}}}@media(max-width:580px){{nav .download{{display:none}}h1{{font-size:38px}}.modes,.caps,.report{{grid-template-columns:1fr}}.version-card{{display:grid}}.sticky{{left:18px;right:18px}}.sticky .download{{width:100%}}}}@media(prefers-reduced-motion:reduce){{*{{animation:none!important;transition:none!important}}canvas{{display:none}}}}
-html{{overflow-x:hidden}}canvas{{width:100%;height:100%}}.trust-strip{{max-width:1188px;margin:-26px auto 30px;display:grid;grid-template-columns:repeat(4,1fr);border:1px solid #4ca9e42b;border-radius:18px;background:#071522d9;box-shadow:0 22px 70px #0006;overflow:hidden}}.trust-strip span{{padding:17px 20px;color:#a9bad0;border-right:1px solid #ffffff0d;font-size:13px}}.trust-strip span:last-child{{border:0}}.trust-strip i{{font-style:normal;color:var(--blue);font:800 11px/1 monospace;margin-right:10px}}.pain-grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}}.pain{{padding:28px;border:1px solid #6aa9df2d;border-radius:18px;background:linear-gradient(145deg,#0d2034dd,#07111ddd);position:relative;overflow:hidden}}.pain b{{display:block;color:var(--gold);font-size:13px;letter-spacing:1px}}.pain h3{{font-size:21px;margin:12px 0 8px}}.pain p{{color:var(--muted);margin:0}}@media(max-width:900px){{.trust-strip{{grid-template-columns:repeat(2,1fr);margin:0 26px}}.pain-grid{{grid-template-columns:1fr}}}}@media(max-width:580px){{.core{{overflow:hidden}}.trust-strip{{grid-template-columns:1fr}}}}
-</style></head><body><canvas id='fx'></canvas><div class='gridbg'></div><nav><div class='brand'><i>◈</i>{esc(name)}</div><a class='{download_class}' href='{download_href}'>一键下载 V{esc(version)}</a></nav>
-<main><section class='hero'><div><span class='eyebrow'>TIKTOK LIVE · PREFLIGHT SYSTEM</span><h1><em>{esc(title)}</em></h1><p class='lead'>{esc(subtitle)}<br>{esc(intro)}</p><div class='actions'><a class='{download_class}' href='{download_href}'>立即下载正式安装版 <span>→</span></a><small>Windows 10 / 11 · 硬安装程序</small></div></div><div class='core'><div class='pulse'></div><div class='orbit o1'></div><div class='orbit o2'></div><div class='orbit o3'></div><div class='chip'><b>直播环境<br>检测核心</b></div></div></section>
-<div class='trust-strip'>{trust_html}</div>
-<section class='block'><div class='section-head'><div><span class='eyebrow'>WHY PREFLIGHT</span><h2>真正影响开播的，往往发生在点击开播之前</h2></div><p>网络、编码、设备和 Windows 环境任何一项变化，都可能让正常直播突然卡顿、黑屏或无声。</p></div><div class='pain-grid'><article class='pain'><b>NETWORK</b><h3>网络数据说清楚</h3><p>展示上下行、稳定上传、延迟、抖动、丢包、IP 归属和目标地区线路。</p></article><article class='pain'><b>DEVICE & ENCODER</b><h3>设备和编码提前确认</h3><p>检查摄像头、麦克风、采集卡、GPU 编码器及直播软件实际参数。</p></article><article class='pain'><b>RESOLUTION LOOP</b><h3>问题不只停在提示</h3><p>能安全处理的直接处理并复检，无法自动处理的明确告诉你下一步。</p></article></div></section>
-<section class='block'><div class='section-head'><div><span class='eyebrow'>DUAL MODE</span><h2>两种模式，只解决开播前的实际问题</h2></div><p>日常检查保持只读；环境配置在确认后执行。产品不读取账号密码、Cookie 或个人文件。</p></div><div class='modes'><article class='mode'><strong>DAILY PREFLIGHT</strong><h3>一键开播检查</h3><p>{esc(settings.get('home_daily_text',''))}</p></article><article class='mode gold'><strong>ENVIRONMENT SETUP</strong><h3>一键配置环境</h3><p>{esc(settings.get('home_setup_text',''))}</p></article></div></section>
-<section class='block'><div class='section-head'><div><span class='eyebrow'>REAL CHECKS</span><h2>七组真实检查，不靠一句笼统结论</h2></div><p>每个异常都给出检测值、证据、问题定位、不处理的影响、解决步骤与复检入口。</p></div><div class='caps'>{feature_html}</div></section>
-<section class='block'><div class='section-head'><div><span class='eyebrow'>CLOSED LOOP</span><h2>从发现问题，到确认能否开播</h2></div></div><ol class='flow'>{step_html}</ol></section>
-<section class='block'><div class='section-head'><div><span class='eyebrow'>REPORT SAMPLE</span><h2>关键数据摆出来，再给结论</h2></div></div><div class='report'><div class='metric'><span>稳定上传</span><b>真实采样</b></div><div class='metric'><span>目标地区延迟</span><b>多节点</b></div><div class='metric'><span>编码与设备</span><b>本机读取</b></div><div class='metric'><span>技术准备度</span><b class='good'>明确分级</b></div></div></section>
-<section class='block'><div class='version-card'><div><span class='eyebrow'>CURRENT RELEASE</span><h3>V{esc(version)}</h3><div class='meta'>安装包 {esc(size)} · 发布于 {esc(date)}<br>{esc(settings.get('home_system_requirements',''))}</div></div><a class='{download_class}' href='{download_href}'>一键下载安装程序</a></div></section>
-<section class='block'><div class='section-head'><div><span class='eyebrow'>FAQ</span><h2>使用说明</h2></div></div><div class='faq'>{faq_html}</div></section></main>
-<footer><b>{esc(DISCLAIMER)}</b><br>{esc(settings.get('home_extra_notice',''))}</footer><div class='sticky'><a class='{download_class}' href='{download_href}'>下载 V{esc(version)}</a></div>
-<script>(()=>{{const c=document.querySelector('#fx'),x=c.getContext('2d');let w,h,p=[],running=true;function size(){{w=c.width=innerWidth*devicePixelRatio;h=c.height=innerHeight*devicePixelRatio;p=Array.from({{length:Math.min(85,Math.floor(innerWidth/18))}},()=>[Math.random()*w,Math.random()*h,(Math.random()-.5)*.22*devicePixelRatio,(Math.random()-.5)*.22*devicePixelRatio])}}function draw(){{if(!running)return;x.clearRect(0,0,w,h);x.fillStyle='#58c9ff99';for(const a of p){{a[0]+=a[2];a[1]+=a[3];if(a[0]<0||a[0]>w)a[2]*=-1;if(a[1]<0||a[1]>h)a[3]*=-1;x.beginPath();x.arc(a[0],a[1],1.2*devicePixelRatio,0,7);x.fill()}}requestAnimationFrame(draw)}}addEventListener('resize',size);document.addEventListener('visibilitychange',()=>{{running=!document.hidden;if(running)draw()}});if(!matchMedia('(prefers-reduced-motion:reduce)').matches){{size();draw()}}}})();</script></body></html>"""
+    dl_cls = "btn btn-primary" if release else "btn btn-primary disabled"
+    dl_href = "/download/latest" if release else "#unavailable"
+
+    feature_html = "".join(
+        f"<article class='cap'><span>{i:02d}</span><h3>{esc(item)}</h3>"
+        f"<p>真实采样 · 明确证据 · 可复检</p></article>"
+        for i, item in enumerate(features[:7], 1)
+    )
+    step_html = "".join(
+        f"<li><b>STEP {i:02d}</b><span>{esc(item)}</span></li>"
+        for i, item in enumerate(steps[:5], 1)
+    )
+    faq_pairs = [
+        (faq[i], faq[i + 1] if i + 1 < len(faq) else "软件会展示检测证据、影响与下一步处理建议。")
+        for i in range(0, min(len(faq), 12), 2)
+    ]
+    faq_html = "".join(
+        f"<details><summary>{esc(q)}</summary><p>{esc(a)}</p></details>"
+        for q, a in faq_pairs
+    )
+    trust_cells = (
+        ("01", "完全免费"),
+        ("02", "真实网络采样"),
+        ("03", "七组开播检查"),
+        ("04", "不读取账号数据"),
+    )
+    trust_html = "".join(
+        f"<div class='trust-cell'><i>{i}</i><b>{t}</b></div>" for i, t in trust_cells
+    )
+
+    tiers_html = """
+<article class='tier'>
+    <span class='tag'>FREE · 下载即用</span>
+    <div class='price'>0<small> / 永久免费下载</small></div>
+    <p class='desc'>下载即用，无广告、无内嵌收费。</p>
+    <ul>
+        <li>完整 7 组开播检查</li>
+        <li>目标地区网络实测</li>
+        <li>本地保存检测报告</li>
+    </ul>
+</article>
+<article class='tier featured'>
+    <span class='badge'>推荐</span>
+    <span class='tag'>TRIAL · 注册解锁</span>
+    <div class='price'>3<small> 天完整功能</small></div>
+    <p class='desc'>手机号注册后，填真实资料立即启用。</p>
+    <ul>
+        <li>包含全部检测能力</li>
+        <li>一键配置环境</li>
+        <li>历史报告同步与对比</li>
+    </ul>
+</article>
+<article class='tier'>
+    <span class='tag'>PERMANENT · 联系客服</span>
+    <div class='price'>免费<small> · 永久使用权</small></div>
+    <p class='desc'>填真实资料后，加客服微信领取。</p>
+    <ul>
+        <li>永久免费使用</li>
+        <li>持续跟进版本更新</li>
+        <li>专属技术支持</li>
+    </ul>
+</article>
+"""
+
+    return f"""<!doctype html><html lang='zh-CN'><head>
+<meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>{esc(name)}｜开播前技术准备度检测 · 完全免费</title>
+<meta name='description' content='{esc(intro)} 完全免费，注册即送 3 天完整功能，联系客服领永久使用权。'>
+<style>{CSS}</style></head><body>
+<canvas id='fx'></canvas><div class='gridbg'></div>
+
+<nav><div class='inner'>
+    <a class='brand' href='/'><i>◆</i>{esc(name)}</a>
+    <div class='nav-links'>
+        <a href='#tiers'>免费与授权</a>
+        <a href='#modes'>核心能力</a>
+        <a href='#faq'>常见问题</a>
+        <a class='{dl_cls}' href='{dl_href}'>下载 V{esc(version)}</a>
+    </div>
+</div></nav>
+
+<main>
+<section class='hero'>
+    <div>
+        <span class='eyebrow'><span class='dot'></span>完全免费 · 无广告 · 注册即用</span>
+        <h1>{esc(title)}<br><em>技术准备好，再点开播</em></h1>
+        <p class='lead'>{esc(subtitle)}<br>{esc(intro)}</p>
+        <div class='cta-row'>
+            <a class='{dl_cls} btn-lg' href='{dl_href}'>免费下载 V{esc(version)} →</a>
+            <a class='btn btn-ghost btn-lg' href='#tiers'>如何领永久使用权</a>
+        </div>
+        <p class='cta-hint'>Windows 10 / 11 · 硬安装程序 · {esc(size)}</p>
+    </div>
+    <div class='core'>
+        <div class='orbit o1'></div><div class='orbit o2'></div><div class='orbit o3'></div>
+        <div class='chip'><small>PREFLIGHT CORE</small>直播环境<br>检测核心</div>
+    </div>
+</section>
+
+<section class='trust'><div class='trust-inner'>{trust_html}</div></section>
+
+<section class='block' id='tiers'>
+    <div class='section-head'>
+        <div><span class='eyebrow'>PRICING</span><h2>产品完全免费 · 三步领永久使用权</h2></div>
+        <p>下载即用，无功能限制。手机号注册送 3 天，填真实资料并添加客服微信，即可领取永久免费使用权。</p>
+    </div>
+    <div class='tiers'>{tiers_html}</div>
+</section>
+
+<section class='block' id='modes'>
+    <div class='section-head'>
+        <div><span class='eyebrow'>DUAL MODE</span><h2>两种模式，只解决开播前的实际问题</h2></div>
+        <p>日常检查保持只读；环境配置需要确认后执行。产品不读取账号密码、Cookie 或个人文件。</p>
+    </div>
+    <div class='modes'>
+        <article class='mode'><strong>DAILY PREFLIGHT</strong><h3>一键开播检查</h3>
+            <p>{esc(settings.get('home_daily_text', '每天开播前跑一次，检出网络、编码、设备、系统的真实状况。'))}</p></article>
+        <article class='mode gold'><strong>ENVIRONMENT SETUP</strong><h3>一键配置环境</h3>
+            <p>{esc(settings.get('home_setup_text', '首次接入或换电脑后使用，一次性把 Windows 直播环境配到位。'))}</p></article>
+    </div>
+</section>
+
+<section class='block'>
+    <div class='section-head'>
+        <div><span class='eyebrow'>REAL CHECKS</span><h2>七组真实检查，不靠一句笼统结论</h2></div>
+        <p>每个异常都给出检测值、证据、问题定位、不处理的影响、解决步骤与复检入口。</p>
+    </div>
+    <div class='caps'>{feature_html}</div>
+</section>
+
+<section class='block'>
+    <div class='section-head'>
+        <div><span class='eyebrow'>CLOSED LOOP</span><h2>从发现问题，到确认能否开播</h2></div>
+    </div>
+    <ol class='flow'>{step_html}</ol>
+</section>
+
+<section class='block'>
+    <div class='section-head'>
+        <div><span class='eyebrow'>REPORT SAMPLE</span><h2>关键数据摆出来，再给结论</h2></div>
+    </div>
+    <div class='report'>
+        <div class='metric'><span>稳定上传</span><b>真实采样</b></div>
+        <div class='metric'><span>目标地区延迟</span><b>多节点</b></div>
+        <div class='metric'><span>编码与设备</span><b>本机读取</b></div>
+        <div class='metric'><span>技术准备度</span><b class='good'>明确分级</b></div>
+    </div>
+</section>
+
+<section class='block'>
+    <div class='release'>
+        <div>
+            <span class='eyebrow'>CURRENT RELEASE</span>
+            <h3>V{esc(version)}</h3>
+            <div class='meta'>安装包 {esc(size)} · 发布于 {esc(date)}<br>{esc(settings.get('home_system_requirements', 'Windows 10 / 11 · 4GB RAM 及以上'))}</div>
+        </div>
+        <a class='{dl_cls} btn-lg' href='{dl_href}'>免费下载安装程序 ↓</a>
+    </div>
+</section>
+
+<section class='block' id='faq'>
+    <div class='section-head'>
+        <div><span class='eyebrow'>FAQ</span><h2>使用说明</h2></div>
+    </div>
+    <div class='faq'>{faq_html}</div>
+</section>
+</main>
+
+<footer>
+    <b>{esc(DISCLAIMER)}</b>
+    {esc(settings.get('home_extra_notice', ''))}
+    <div class='foot-links'>
+        <a href='/'>主页</a>
+        <a href='/tk-admin/'>管理后台</a>
+        <a href='{dl_href}'>下载最新版</a>
+    </div>
+</footer>
+
+<div class='sticky'><a class='{dl_cls}' href='{dl_href}'>免费下载 V{esc(version)}</a></div>
+
+<script>(()=>{{const c=document.querySelector('#fx');if(!c)return;const x=c.getContext('2d');let w,h,p=[],running=true;
+function size(){{w=c.width=innerWidth*devicePixelRatio;h=c.height=innerHeight*devicePixelRatio;p=Array.from({{length:Math.min(70,Math.floor(innerWidth/22))}},()=>[Math.random()*w,Math.random()*h,(Math.random()-.5)*.18*devicePixelRatio,(Math.random()-.5)*.18*devicePixelRatio]);}}
+function draw(){{if(!running)return;x.clearRect(0,0,w,h);x.fillStyle='rgba(88,201,255,.35)';for(const a of p){{a[0]+=a[2];a[1]+=a[3];if(a[0]<0||a[0]>w)a[2]*=-1;if(a[1]<0||a[1]>h)a[3]*=-1;x.beginPath();x.arc(a[0],a[1],1*devicePixelRatio,0,7);x.fill();}}requestAnimationFrame(draw);}}
+addEventListener('resize',size);document.addEventListener('visibilitychange',()=>{{running=!document.hidden;if(running)draw();}});
+if(!matchMedia('(prefers-reduced-motion:reduce)').matches){{size();draw();}}}})();</script>
+</body></html>"""
 
 
 def unavailable_page() -> str:
-    return """<!doctype html><meta charset='utf-8'><title>暂不可下载</title><style>body{margin:0;display:grid;place-items:center;min-height:100vh;background:#030812;color:#eef7ff;font-family:'Microsoft YaHei UI';text-align:center}.box{padding:44px;border:1px solid #244768;border-radius:22px;background:#0a1726;max-width:520px}p{color:#8ea4bb}a{color:#55c9ff}</style><div class='box'><h1>正式版本正在准备中</h1><p>当前没有可用的正式安装程序，请稍后重试或联系技术支持。</p><a href='/'>返回产品主页</a></div>"""
+    return """<!doctype html><html lang='zh-CN'><head><meta charset='utf-8'><title>暂不可下载</title>
+<style>body{margin:0;display:grid;place-items:center;min-height:100vh;background:#050a13;color:#e6eef9;font-family:"Microsoft YaHei UI",sans-serif;text-align:center;padding:24px}
+.box{padding:44px 40px;border:1px solid #152840;border-radius:18px;background:linear-gradient(180deg,#0a141f,#0d1926);max-width:520px}
+h1{margin:0 0 12px;font-size:24px}p{color:#7c8ea6;line-height:1.7;margin:0}
+a{color:#4ea1ff;display:inline-block;margin-top:22px;padding:10px 22px;border:1px solid #152840;border-radius:10px;text-decoration:none;font-weight:600;transition:border-color .2s}
+a:hover{border-color:#4ea1ff}</style></head><body>
+<div class='box'><h1>正式版本正在准备中</h1><p>当前没有可用的正式安装程序，请稍后重试或联系技术支持。</p><a href='/'>返回产品主页</a></div>
+</body></html>"""

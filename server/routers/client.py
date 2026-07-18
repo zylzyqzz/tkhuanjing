@@ -1,18 +1,19 @@
-from __future__ import annotations
-
 import json
 import secrets
+import string
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import CheckItem, CheckProfile, CheckReport, Code, Device, LicenseEvent, Release, now_iso
-from ..schemas import ActivateRequest, AuthorizeRequest, RegisterRequest, ReportIn
-from ..security import current_device, hash_token
+from ..models import CheckItem, CheckProfile, CheckReport, Code, Device, LicenseEvent, Release, User, UserSession, VerificationCode, now_iso
+from ..schemas import ActivateRequest, AuthorizeRequest, ForgotPasswordRequest, RegisterRequest, ReportIn, ResetPasswordRequest, SendCodeRequest, UserLoginRequest, UserProfileUpdate, UserRegisterRequest
+from ..security import current_device, current_user, hash_token, hasher, verify_password
 from ..services import DEFAULT_PROFILE, release_manifest
+from ..config import get_settings
+from ..email_utils import send_verification_code
 from client_v2.regions import REGIONS
 
 
@@ -175,13 +176,15 @@ def regions() -> dict:
     return {"regions": [{
         "id": item.region_id, "label": item.label, "country_code": item.country_code,
         "windows_timezone": item.windows_timezone, "iana_timezone": item.iana_timezone,
+        "group": getattr(item, 'group', 'other'),
     } for item in REGIONS]}
 
 
 @router.get("/network-intelligence/status")
 def network_intelligence_status() -> dict:
     return {"providers": [
-        {"name": "PingIP", "role": "IP 归属与辅助情报", "mode": "primary"},
+        {"name": "Cloudflare + IPWho + RDAP", "role": "公网 IP、归属与注册信息", "mode": "primary"},
+        {"name": "PingIP", "role": "可选 IP 属性增强", "mode": "optional"},
         {"name": "Cloudflare + GeoIP", "role": "公网 IP 与测速降级链路", "mode": "fallback"},
     ], "policy": "第三方数据失败时返回 UNKNOWN，不把服务失败判定为客户网络故障"}
 
@@ -194,3 +197,173 @@ async def upload_test(request: Request) -> dict:
         if size > 8 * 1024 * 1024:
             raise HTTPException(status_code=413, detail="测速数据过大")
     return {"ok": True, "bytes": size, "received": size}
+
+
+def _make_user_session(db: Session, user: "User", device_id: str | None = None) -> str:
+    token = secrets.token_urlsafe(32)
+    expires = datetime.now(timezone.utc) + timedelta(hours=get_settings().user_session_hours)
+    db.add(UserSession(token_hash=hash_token(token), user_id=user.id, device_id=device_id, expires_at=expires.isoformat()))
+    db.commit()
+    return token
+
+
+def _public_user(u: "User") -> dict:
+    return {
+        "id": u.id, "phone": u.phone, "phone_country": u.phone_country, "email": u.email,
+        "profile_completed_at": u.profile_completed_at, "trial_granted": u.trial_granted,
+        "trial_expires_at": u.trial_expires_at, "status": u.status,
+    }
+
+
+def _gen_code(settings) -> str:
+    return settings.dev_verify_code if (settings.dev_verify_code and settings.env != "production") else f"{secrets.randbelow(900000) + 100000:06d}"
+
+
+@router.post("/auth/send-code")
+def auth_send_code(payload: SendCodeRequest, db: Session = Depends(get_db)) -> dict:
+    if payload.purpose not in ("register", "reset_password"):
+        raise HTTPException(status_code=400, detail="无效的验证码用途")
+    settings = get_settings()
+    now = datetime.now(timezone.utc)
+    recent = db.scalar(
+        select(VerificationCode)
+        .where(VerificationCode.target == payload.target, VerificationCode.purpose == payload.purpose, VerificationCode.used == 0)
+        .order_by(VerificationCode.id.desc())
+    )
+    if recent is not None and (now - datetime.fromisoformat(recent.created_at)).total_seconds() < settings.verify_code_cooldown_seconds:
+        raise HTTPException(status_code=429, detail="验证码发送过于频繁，请稍后再试")
+    code = _gen_code(settings)
+    expires_at = (now + timedelta(minutes=settings.verify_code_ttl_minutes)).isoformat()
+    db.add(VerificationCode(target=payload.target, code=code, purpose=payload.purpose, expires_at=expires_at))
+    db.commit()
+    send_verification_code(payload.target, code, payload.purpose)
+    result: dict = {"ok": True}
+    if settings.env != "production":
+        result["dev_code"] = code
+    return result
+
+
+@router.post("/auth/register")
+def auth_register(payload: UserRegisterRequest, db: Session = Depends(get_db)) -> dict:
+    if db.scalar(select(User).where(User.phone == payload.phone)):
+        raise HTTPException(status_code=409, detail="手机号已注册")
+    user = User(phone=payload.phone, phone_country=payload.phone_country, password_hash=hasher.hash(payload.password), email=payload.email, status="active")
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    token = _make_user_session(db, user)
+    return {"token": token, "user": _public_user(user)}
+
+
+@router.post("/auth/login")
+def auth_login(payload: UserLoginRequest, db: Session = Depends(get_db)) -> dict:
+    user = db.scalar(select(User).where(User.phone == payload.phone))
+    if user is None or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="手机号或密码错误")
+    user.last_active_at = now_iso()
+    db.commit()
+    token = _make_user_session(db, user)
+    return {"token": token, "user": _public_user(user)}
+
+
+@router.post("/auth/forgot-password")
+def auth_forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)) -> dict:
+    settings = get_settings()
+    user = db.scalar(select(User).where(User.phone == payload.phone))
+    if user is not None:
+        code = _gen_code(settings)
+        expires_at = (datetime.now(timezone.utc) + timedelta(minutes=settings.verify_code_ttl_minutes)).isoformat()
+        db.add(VerificationCode(target=user.email, code=code, purpose="reset_password", expires_at=expires_at))
+        db.commit()
+        send_verification_code(user.email, code, "reset_password")
+        if settings.env != "production":
+            return {"ok": True, "dev_code": code}
+    return {"ok": True}
+
+
+@router.post("/auth/reset-password")
+def auth_reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)) -> dict:
+    settings = get_settings()
+    now = datetime.now(timezone.utc)
+    user = db.scalar(select(User).where(User.phone == payload.phone))
+    if user is None:
+        raise HTTPException(status_code=400, detail="账号不存在")
+    vc = db.scalar(
+        select(VerificationCode)
+        .where(VerificationCode.target == user.email, VerificationCode.purpose == "reset_password", VerificationCode.used == 0)
+        .order_by(VerificationCode.id.desc())
+    )
+    valid = vc is not None and datetime.fromisoformat(vc.expires_at) > now and (
+        vc.code == payload.code or (settings.dev_verify_code and settings.env != "production" and payload.code == settings.dev_verify_code)
+    )
+    if not valid:
+        raise HTTPException(status_code=400, detail="验证码错误或已过期")
+    user.password_hash = hasher.hash(payload.password)
+    vc.used = 1
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/auth/logout")
+def auth_logout(me: dict = Depends(current_user), authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> dict:
+    if authorization and authorization.startswith("Bearer "):
+        session = db.scalar(select(UserSession).where(UserSession.token_hash == hash_token(authorization[7:])))
+        if session is not None:
+            session.revoked = 1
+            db.commit()
+    return {"ok": True}
+
+
+def _parse_business_types(raw) -> list:
+    try:
+        val = json.loads(raw) if raw else []
+    except (ValueError, TypeError):
+        val = []
+    return val if isinstance(val, list) else []
+
+
+def _profile_is_complete(u: "User") -> bool:
+    return bool(u.company_name and u.country and _parse_business_types(u.business_types) and u.wechat_id)
+
+
+def _user_profile_view(u: "User") -> dict:
+    return {
+        "id": u.id, "phone": u.phone, "phone_country": u.phone_country, "email": u.email,
+        "company_name": u.company_name, "country": u.country, "city": u.city,
+        "business_types": _parse_business_types(u.business_types), "wechat_id": u.wechat_id,
+        "platform_account": u.platform_account, "profile_completed_at": u.profile_completed_at,
+        "trial_granted": u.trial_granted, "trial_expires_at": u.trial_expires_at,
+        "status": u.status, "created_at": u.created_at, "last_active_at": u.last_active_at,
+    }
+
+
+@router.get("/user/profile")
+def get_user_profile(me: dict = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    user = db.get(User, me["user_id"])
+    if user is None:
+        raise HTTPException(status_code=404, detail="账号不存在")
+    return {"profile": _user_profile_view(user)}
+
+
+@router.put("/user/profile")
+def update_user_profile(payload: UserProfileUpdate, me: dict = Depends(current_user), db: Session = Depends(get_db)) -> dict:
+    user = db.get(User, me["user_id"])
+    if user is None:
+        raise HTTPException(status_code=404, detail="账号不存在")
+    data = payload.model_dump(exclude_unset=True)
+    was_complete = _profile_is_complete(user)
+    for key, value in data.items():
+        if value is None:
+            continue
+        if key == "business_types":
+            user.business_types = json.dumps(value, ensure_ascii=False)
+        else:
+            setattr(user, key, value)
+    now = datetime.now(timezone.utc)
+    if not was_complete and _profile_is_complete(user) and not user.profile_completed_at:
+        user.profile_completed_at = now_iso()
+        user.trial_granted = 1
+        user.trial_expires_at = (now + timedelta(days=3)).isoformat()
+    user.last_active_at = now_iso()
+    db.commit()
+    return {"profile": _user_profile_view(user), "trial_granted": bool(user.trial_granted)}

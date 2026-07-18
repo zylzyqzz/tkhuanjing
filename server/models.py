@@ -104,6 +104,7 @@ class Device(Base):
     last_seen: Mapped[str] = mapped_column(String(40), default=now_iso, index=True)
     status: Mapped[str] = mapped_column(String(20), default="active")
     notes: Mapped[str] = mapped_column(Text, default="")
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
 
 class CheckReport(Base):
@@ -223,3 +224,47 @@ class Admin(Base):
     password_hash: Mapped[str] = mapped_column(Text)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[str] = mapped_column(String(40), default=now_iso)
+
+
+class User(Base):
+    __tablename__ = "users"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    phone: Mapped[str] = mapped_column(String(30), unique=True, index=True)
+    phone_country: Mapped[str] = mapped_column(String(10), default="CN")
+    password_hash: Mapped[str] = mapped_column(Text)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    company_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    business_types: Mapped[str | None] = mapped_column(Text, nullable=True, default="[]")
+    wechat_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    platform_account: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    profile_completed_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    trial_granted: Mapped[int] = mapped_column(Integer, default=0)
+    trial_expires_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    created_at: Mapped[str] = mapped_column(String(40), default=now_iso)
+    last_active_at: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(20), default="active", index=True)
+    sessions: Mapped[list["UserSession"]] = relationship(cascade="all, delete-orphan")
+
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    device_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_at: Mapped[str] = mapped_column(String(40), default=now_iso)
+    expires_at: Mapped[str] = mapped_column(String(40))
+    revoked: Mapped[int] = mapped_column(Integer, default=0)
+    user: Mapped["User"] = relationship(back_populates="sessions")
+
+
+class VerificationCode(Base):
+    __tablename__ = "verification_codes"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    target: Mapped[str] = mapped_column(String(255), index=True)
+    code: Mapped[str] = mapped_column(String(10))
+    purpose: Mapped[str] = mapped_column(String(30))
+    used: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[str] = mapped_column(String(40), default=now_iso)
+    expires_at: Mapped[str] = mapped_column(String(40))

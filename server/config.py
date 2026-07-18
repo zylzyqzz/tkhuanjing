@@ -23,6 +23,15 @@ class Settings(BaseSettings):
     update_public_key: str = ""
     session_hours: int = 8
     max_upload_mb: int = 500
+    dev_verify_code: str = ""
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = "noreply@wdai.cc"
+    verify_code_ttl_minutes: int = 10
+    verify_code_cooldown_seconds: int = 60
+    user_session_hours: int = 720
 
     @property
     def downloads_dir(self) -> Path:

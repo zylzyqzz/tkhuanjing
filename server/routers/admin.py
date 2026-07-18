@@ -14,13 +14,13 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..database import get_db
-from ..models import Admin, AuditLog, CheckItem, CheckProfile, CheckReport, Code, Customer, Device, DownloadStat, LiveRoom, Release, Setting, SupportCase, now_iso
+from ..models import Admin, AuditLog, CheckItem, CheckProfile, CheckReport, Code, Customer, Device, DownloadStat, LiveRoom, Release, Setting, SupportCase, User, UserSession, now_iso
 from ..schemas import CodeGenerateRequest, CodeStatusRequest, CustomerIn, DeviceIn, LoginRequest, ProfileIn, ReleaseActivateIn, RoomIn, SettingsIn, SupportIn
 from ..security import clear_login_attempts, current_admin, make_session, rate_limit_login, request_ip, require_csrf, verify_password
 from ..services import audit, create_codes, file_sha256
 
 
-router = APIRouter(prefix="/tk-api", tags=["admin"])
+router = APIRouter(prefix="/wd-api", tags=["admin"])
 settings = get_settings()
 
 
@@ -37,7 +37,7 @@ def login(payload: LoginRequest, request: Request, response: Response, db: Sessi
         raise HTTPException(status_code=401, detail="账号或密码错误")
     clear_login_attempts(ip)
     token, csrf = make_session(admin.username)
-    response.set_cookie("tk_session", token, httponly=True, samesite="strict", secure=settings.env == "production", max_age=settings.session_hours * 3600)
+    response.set_cookie("wd_session", token, httponly=True, samesite="strict", secure=settings.env == "production", max_age=settings.session_hours * 3600)
     audit(db, admin.username, "login", details=ip)
     db.commit()
     return {"ok": True, "csrf": csrf, "username": admin.username}
@@ -50,7 +50,7 @@ def session(admin: dict = Depends(current_admin)) -> dict:
 
 @router.post("/logout")
 def logout(response: Response, admin: dict = Depends(require_csrf)) -> dict:
-    response.delete_cookie("tk_session")
+    response.delete_cookie("wd_session")
     return {"ok": True}
 
 
@@ -201,7 +201,8 @@ def setup_reports(limit: int = Query(200, ge=1, le=1000), _admin: dict = Depends
 @router.get("/nodes/status")
 def node_status(_admin: dict = Depends(current_admin)) -> dict:
     return {"nodes": [
-        {"name": "PingIP", "role": "IP 归属与辅助情报", "status": "configured", "mode": "primary"},
+        {"name": "Cloudflare + IPWho + RDAP", "role": "公网 IP、归属与注册信息", "status": "configured", "mode": "primary"},
+        {"name": "PingIP", "role": "可选 IP 属性增强", "status": "optional", "mode": "optional"},
         {"name": "Cloudflare Speed", "role": "上传与下载多轮采样", "status": "configured", "mode": "primary"},
         {"name": "Regional TLS probes", "role": "目标地区多节点响应", "status": "configured", "mode": "multi-node"},
     ], "policy": "单个第三方节点不可用时返回 UNKNOWN，不判定客户网络故障"}
@@ -382,3 +383,77 @@ def activate_release(payload: ReleaseActivateIn, admin: dict = Depends(require_c
         raise HTTPException(409, "安装包缺失、大小不符或哈希校验失败，禁止发布")
     db.execute(Release.__table__.update().where(Release.channel == row.channel, Release.version != row.version).values(active=False)); row.active = True
     audit(db, admin["username"], "activate_release", "release", row.version, row.channel); db.commit(); return {"ok": True}
+
+
+USER_FIELDS = ["id", "phone", "phone_country", "email", "company_name", "country", "city", "wechat_id", "platform_account", "profile_completed_at", "trial_granted", "trial_expires_at", "status", "created_at", "last_active_at"]
+
+
+def _parse_business_types(raw) -> list:
+    try:
+        val = json.loads(raw) if raw else []
+    except (ValueError, TypeError):
+        val = []
+    return val if isinstance(val, list) else []
+
+
+def _user_row(u: User) -> dict:
+    d = row_dict(u, USER_FIELDS)
+    d["business_types"] = _parse_business_types(u.business_types)
+    return d
+
+
+def _user_clauses(phone: str, company_name: str, country: str, business_type: str, status: str) -> list:
+    clauses = []
+    if phone:
+        clauses.append(User.phone.contains(phone))
+    if company_name:
+        clauses.append(User.company_name.contains(company_name))
+    if country:
+        clauses.append(User.country.contains(country))
+    if business_type:
+        clauses.append(User.business_types.contains(business_type))
+    if status:
+        clauses.append(User.status == status)
+    return clauses
+
+
+@router.get("/users")
+def list_users(phone: str = "", company_name: str = "", country: str = "", business_type: str = "", status: str = "", page: int = 1, page_size: int = 50, _admin: dict = Depends(current_admin), db: Session = Depends(get_db)) -> dict:
+    clauses = _user_clauses(phone, company_name, country, business_type, status)
+    stmt = select(User)
+    count_stmt = select(func.count()).select_from(User)
+    if clauses:
+        stmt = stmt.where(*clauses)
+        count_stmt = count_stmt.where(*clauses)
+    total = db.scalar(count_stmt) or 0
+    rows = db.scalars(stmt.order_by(User.id.desc()).limit(page_size).offset(max(0, page - 1) * page_size)).all()
+    return {"total": total, "page": page, "page_size": page_size, "users": [_user_row(x) for x in rows]}
+
+
+@router.get("/users/export")
+def export_users(phone: str = "", company_name: str = "", country: str = "", business_type: str = "", status: str = "", _admin: dict = Depends(current_admin), db: Session = Depends(get_db)):
+    clauses = _user_clauses(phone, company_name, country, business_type, status)
+    stmt = select(User)
+    if clauses:
+        stmt = stmt.where(*clauses)
+    rows = db.scalars(stmt.order_by(User.id.desc())).all()
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    headers = ["id", "phone", "phone_country", "email", "company_name", "country", "city", "business_types", "wechat_id", "platform_account", "profile_completed_at", "trial_granted", "trial_expires_at", "status", "created_at", "last_active_at"]
+    writer.writerow(headers)
+    for u in rows:
+        d = row_dict(u, USER_FIELDS)
+        writer.writerow([d.get(h, "") if h != "business_types" else ";".join(_parse_business_types(u.business_types)) for h in headers])
+    buf.seek(0)
+    return StreamingResponse(iter(["\ufeff" + buf.getvalue()]), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": "attachment; filename=wd-users-export.csv"})
+
+
+@router.get("/users/{user_id}")
+def user_detail(user_id: int, _admin: dict = Depends(current_admin), db: Session = Depends(get_db)) -> dict:
+    u = db.get(User, user_id)
+    if u is None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    d = _user_row(u)
+    d["device_count"] = db.scalar(select(func.count()).select_from(Device).where(Device.user_id == u.id)) or 0
+    d["session_count"] = db.scalar(select(func.count()).select_from(UserSession).where(UserSession.user_id == u.id, UserSession.revoked == 0)) or 0
+    return {"user": d}

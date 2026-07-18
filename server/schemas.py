@@ -156,3 +156,64 @@ class ProfileIn(BaseModel):
 
 class ReleaseActivateIn(BaseModel):
     version: str = Field(min_length=1, max_length=40)
+
+
+class UserRegisterRequest(BaseModel):
+    phone: str = Field(min_length=6, max_length=30)
+    phone_country: str = Field(default="CN", max_length=10)
+    password: str = Field(min_length=8, max_length=256)
+    password_confirm: str = Field(min_length=8, max_length=256)
+    email: str = Field(min_length=5, max_length=255)
+    code: str = Field(min_length=4, max_length=10)
+
+    @field_validator("password_confirm")
+    @classmethod
+    def passwords_match(cls, v: str, info) -> str:
+        if "password" in info.data and v != info.data["password"]:
+            raise ValueError("两次密码不一致")
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        if not any(c.isdigit() for c in v) or not any(c.isalpha() for c in v):
+            raise ValueError("密码需包含数字和字母")
+        return v
+
+
+class UserLoginRequest(BaseModel):
+    phone: str = Field(min_length=6, max_length=30)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class ForgotPasswordRequest(BaseModel):
+    phone: str = Field(min_length=6, max_length=30)
+
+
+class ResetPasswordRequest(BaseModel):
+    phone: str = Field(min_length=6, max_length=30)
+    code: str = Field(min_length=4, max_length=10)
+    password: str = Field(min_length=8, max_length=256)
+    password_confirm: str = Field(min_length=8, max_length=256)
+
+    @field_validator("password_confirm")
+    @classmethod
+    def passwords_match(cls, v: str, info) -> str:
+        if "password" in info.data and v != info.data["password"]:
+            raise ValueError("两次密码不一致")
+        return v
+
+
+class SendCodeRequest(BaseModel):
+    target: str = Field(min_length=5, max_length=255)
+    purpose: str = Field(default="register", max_length=30)
+
+
+class UserProfileUpdate(BaseModel):
+    company_name: str | None = Field(default=None, max_length=120)
+    country: str | None = Field(default=None, max_length=80)
+    city: str | None = Field(default=None, max_length=80)
+    business_types: list[str] | None = Field(default=None)
+    email: str | None = Field(default=None, max_length=255)
+    wechat_id: str | None = Field(default=None, max_length=80)
+    platform_account: str | None = Field(default=None, max_length=120)

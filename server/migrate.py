@@ -15,13 +15,34 @@ from .services import seed_defaults
 
 
 REQUIRED_COLUMNS = {
+    "users": [
+        "phone_country text default '+86'", "email text default ''", "company_name text default ''",
+        "country text default ''", "city text default ''", "business_types text default '[]'",
+        "wechat_id text default ''", "platform_account text default ''",
+        "profile_completed_at text default null", "trial_granted integer default 0",
+        "trial_expires_at text default null", "status text default 'active'",
+        "created_at text default null", "last_active_at text default null",
+    ],
+    "user_sessions": [
+        "user_id integer default 0", "device_id text default null", "expires_at text default null",
+        "revoked integer default 0", "created_at text default null",
+    ],
+    "verification_codes": [
+        "target text default ''", "code text default ''", "purpose text default 'register'",
+        "expires_at text default null", "used integer default 0", "created_at text default null",
+    ],
     "codes": ["batch text default ''", "plan_code text default ''", "duration_days integer default 0", "expires_at text default null"],
     "releases": [
         "file_size integer default 0", "channel text default 'stable'", "mandatory integer default 0",
         "minimum_version text default ''", "signature text default ''",
     ],
     "live_rooms": ["status text default 'active'"],
-    "devices": ["status text default 'active'", "notes text default ''", "free_trial_started_at text default null", "free_trial_expires_at text default null", "target_region_id text default 'us-los-angeles'"],
+    "devices": [
+        "status text default 'active'", "notes text default ''",
+        "free_trial_started_at text default null", "free_trial_expires_at text default null",
+        "target_region_id text default 'us-los-angeles'",
+        "user_id integer default null",
+    ],
     "check_reports": [
         "schema_version integer default 3", "target_region_id text default 'us-los-angeles'",
         "network_snapshot_json text default '{}'", "ip_profile_json text default '{}'",

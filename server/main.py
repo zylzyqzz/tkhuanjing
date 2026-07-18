@@ -29,7 +29,7 @@ if not logger.handlers:
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     logger.addHandler(handler)
 
-app = FastAPI(title="TK 直播开播检测平台", version="2.5.0", docs_url="/api/docs" if settings.env != "production" else None)
+app = FastAPI(title="VD开播助手管理平台", version="2.8.1", docs_url="/api/docs" if settings.env != "production" else None)
 app.include_router(client.router, prefix="/api/v1/client")
 app.include_router(client.router, prefix="/api/client", include_in_schema=False)
 app.include_router(admin.router)
@@ -114,7 +114,7 @@ def latest_download(db: Session = Depends(get_db)):
     else:
         db.add(DownloadStat(day=day, version=release.version, count=1))
     db.commit()
-    return FileResponse(target, filename=f"WeiDu-TK-Live-Check-{release.version}.exe", media_type="application/octet-stream", headers={"Cache-Control": "no-store"})
+    return FileResponse(target, filename=f"WeiDu-WD-Live-Check-{release.version}.exe", media_type="application/octet-stream", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/downloads/{filename}", include_in_schema=False)
