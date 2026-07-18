@@ -3,8 +3,11 @@ from __future__ import annotations
 import math
 import random
 
+from pathlib import Path
+import sys
+
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QCursor, QLinearGradient, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QCursor, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMainWindow, QPushButton, QTextEdit, QVBoxLayout, QWidget
 
 from .theme import COLORS
@@ -56,16 +59,34 @@ class FramelessWindow(QMainWindow):
         super().mousePressEvent(event)
 
 
+def _titlebar_asset(name: str) -> Path:
+    candidates = [
+        Path(getattr(sys, "_MEIPASS", "")) / "assets" if getattr(sys, "_MEIPASS", "") else Path("."),
+        Path(sys.executable).resolve().parent / "assets",
+        Path(__file__).resolve().parents[2] / "assets",
+    ]
+    for base in candidates:
+        target = base / name
+        if target.exists():
+            return target
+    return candidates[-1] / name
+
+
 class TitleBar(QFrame):
     def __init__(self, window: QMainWindow, title: str, version: str) -> None:
         super().__init__()
         self.window = window
         self.setObjectName("titleBar")
         row = QHBoxLayout(self)
-        row.setContentsMargins(18, 0, 8, 0)
+        row.setContentsMargins(16, 0, 8, 0)
         row.setSpacing(10)
-        mark = QLabel("◇")
+        mark = QLabel()
         mark.setObjectName("brandMark")
+        pix = QPixmap(str(_titlebar_asset("logo.png")))
+        if not pix.isNull():
+            mark.setPixmap(pix.scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        else:
+            mark.setText("◇")
         row.addWidget(mark)
         name = QLabel(title)
         name.setObjectName("windowTitle")

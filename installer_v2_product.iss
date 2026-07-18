@@ -1,18 +1,18 @@
-#define MyAppName "维度 TikTok 直播开播助手"
-#define MyAppVersion "2.5.0"
-#define MyAppExeName "TKLiveCheck.exe"
+#define MyAppName "VD 开播助手"
+#define MyAppVersion "2.9.1"
+#define MyAppExeName "VDLiveCheck.exe"
 
 [Setup]
 AppId={{0BE3AF73-ABCF-4D45-A35B-86D798960D74}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
-AppPublisher=维度光年
-DefaultDirName={localappdata}\Programs\WeiDuTKLiveCheck
+AppPublisher=VD 开播助手
+DefaultDirName={localappdata}\Programs\VDLiveCheck
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=dist_setup_v2
-OutputBaseFilename=维度TikTok直播开播助手安装程序-2.5.0
+OutputBaseFilename=VD开播助手安装程序-2.9.1
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -22,12 +22,12 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 CloseApplications=yes
 RestartApplications=yes
 ArchitecturesAllowed=x64compatible
-VersionInfoVersion=2.5.0.0
+VersionInfoVersion=2.9.1.0
 VersionInfoProductName={#MyAppName}
-VersionInfoCompany=维度光年
+VersionInfoCompany=VD 开播助手
 
 [Files]
-Source: "dist_client_v2\TKLiveCheck\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist_client_v2\VDLiveCheck\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "dist_updater_v2\TKUpdater.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]

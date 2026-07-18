@@ -29,7 +29,7 @@ if not logger.handlers:
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     logger.addHandler(handler)
 
-app = FastAPI(title="VD开播助手管理平台", version="2.8.1", docs_url="/api/docs" if settings.env != "production" else None)
+app = FastAPI(title="VD开播助手管理平台", version="2.9.1", docs_url="/api/docs" if settings.env != "production" else None)
 app.include_router(client.router, prefix="/api/v1/client")
 app.include_router(client.router, prefix="/api/client", include_in_schema=False)
 app.include_router(admin.router)

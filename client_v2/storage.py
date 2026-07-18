@@ -14,15 +14,18 @@ DATA_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "WeiDuTKLiveCheck
 REPORT_DIR = DATA_DIR / "reports"
 CONFIG_FILE = DATA_DIR / "config-v2.json"
 LICENSE_FILE = DATA_DIR / "license-v2.json"
+USER_FILE = DATA_DIR / "user-v2.json"
 QUEUE_FILE = DATA_DIR / "pending-sync.json"
 
 DEFAULT_CONFIG = {
-    "schema_version": 7, "target_region_id": "us-los-angeles", "target_host": "tk.aimj.xin",
+    "schema_version": 8, "target_region_id": "us-los-angeles", "target_host": "tk.aimj.xin",
     "api_base": "https://tk.aimj.xin", "device_id": "", "device_token": "",
     "privacy_confirm_upload": True, "reduced_effects": False, "theme_id": "obsidian",
     "effects_level": "full", "font_scale": "standard", "test_mode": "standard",
     "result_sound": True, "auto_open_report": True, "update_check_on_start": True,
     "report_retention_days": 90, "upload_confirm": True,
+    "startup_page": "home", "remember_last_page": False, "last_page": 0,
+    "show_check_tips": True, "auto_compare_reports": True,
 }
 
 
@@ -96,6 +99,13 @@ def load_config() -> dict:
         config["update_check_on_start"] = True; config["report_retention_days"] = 90
         config["upload_confirm"] = bool(config.get("privacy_confirm_upload", True))
         config["schema_version"] = 7
+    if int(config.get("schema_version", 1)) < 8:
+        config["startup_page"] = "home"
+        config["remember_last_page"] = False
+        config["last_page"] = 0
+        config["show_check_tips"] = True
+        config["auto_compare_reports"] = True
+        config["schema_version"] = 8
     for key, value in DEFAULT_CONFIG.items():
         config.setdefault(key, value)
     if not config["device_id"]:
@@ -105,7 +115,7 @@ def load_config() -> dict:
 
 
 def save_config(config: dict) -> None:
-    config["schema_version"] = 7
+    config["schema_version"] = 8
     atomic_json(CONFIG_FILE, config)
 
 
@@ -170,3 +180,22 @@ def queue_report(report_id: str) -> None:
     if report_id not in queue:
         queue.append(report_id)
         atomic_json(QUEUE_FILE, queue)
+
+
+# ── User session ──────────────────────────────────────────────
+
+DEFAULT_USER = {"logged_in": False, "token": "", "profile": {}}
+
+def load_user() -> dict:
+    return load_json(USER_FILE, DEFAULT_USER)
+
+def save_user(value: dict) -> None:
+    atomic_json(USER_FILE, value)
+
+def set_user_session(token: str, profile: dict) -> None:
+    ensure_dirs()
+    save_user({"logged_in": True, "token": token, "profile": profile})
+
+def clear_user_session() -> None:
+    ensure_dirs()
+    save_user({"logged_in": False, "token": "", "profile": {}})

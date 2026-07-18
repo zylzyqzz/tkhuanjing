@@ -72,8 +72,9 @@ QFrame#titleBar {
 
 QLabel#brandMark {
     color: ${blue};
-    font-size: 22px;
+    font-size: 20px;
     font-weight: 900;
+    padding: 0 2px;
 }
 
 QLabel#windowTitle {
@@ -84,12 +85,12 @@ QLabel#windowTitle {
 }
 
 QLabel#versionPill {
-    color: ${cyan};
-    background: rgba(${cyan_rgb}, 0.16);
-    border: 1px solid rgba(${cyan_rgb}, 0.28);
-    border-radius: 9px;
-    padding: 3px 8px;
-    font-size: 11px;
+    color: ${muted};
+    background: transparent;
+    border: 0;
+    padding: 0 4px;
+    font-size: 10px;
+    letter-spacing: 0.8px;
 }
 
 QPushButton#windowControl {
@@ -118,8 +119,8 @@ QLabel#sideBrand {
     color: ${text};
     font-size: 15px;
     font-weight: 900;
-    letter-spacing: 1px;
-    padding: 16px 0 24px;
+    letter-spacing: 2px;
+    padding: 22px 0 26px;
 }
 
 QPushButton[nav="true"] {
@@ -498,11 +499,48 @@ QLabel[muted="true"] {
     color: ${muted};
 }
 
+QLabel[caption="true"] {
+    color: ${muted};
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding-top: 2px;
+}
+
 QLabel[impact="true"] {
     color: ${gold};
     background: rgba(${gold_rgb}, 0.1);
     border-radius: 8px;
     padding: 8px;
+}
+
+QFrame[card="true"][hero="true"] {
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 rgba(${surface2_rgb}, 0.96),stop:1 rgba(${surface_rgb}, 0.98));
+    border: 1px solid rgba(${blue_rgb}, 0.35);
+    border-radius: 18px;
+}
+
+QLabel#profileHero {
+    color: ${text};
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: 0.4px;
+}
+
+QPushButton[link="true"] {
+    background: transparent;
+    border: 0;
+    color: ${blue};
+    font-weight: 700;
+    padding: 4px 6px;
+    text-align: right;
+}
+
+QPushButton[link="true"]:hover {
+    color: ${cyan};
+    background: transparent;
+    border: 0;
 }
 
 QCheckBox {
@@ -524,12 +562,24 @@ QCheckBox::indicator:checked {
 }
 
 QTableWidget {
-    background: rgba(${surface_rgb}, 0.78);
-    alternate-background-color: rgba(${surface2_rgb}, 0.78);
+    background: rgba(${surface_rgb}, 0.68);
+    alternate-background-color: rgba(${surface2_rgb}, 0.6);
     color: ${text};
     border: 1px solid ${line};
-    border-radius: 12px;
+    border-radius: 14px;
     gridline-color: transparent;
+    selection-background-color: rgba(${blue_rgb}, 0.28);
+}
+
+QTableWidget QTableCornerButton::section {
+    background: rgba(${surface2_rgb}, 0.9);
+    border: 0;
+    border-top-left-radius: 14px;
+}
+
+QHeaderView {
+    background: transparent;
+    border: 0;
 }
 
 QHeaderView::section {
@@ -540,6 +590,12 @@ QHeaderView::section {
     font-weight: 700;
 }
 
+QHeaderView::section:vertical {
+    background: rgba(${surface2_rgb}, 0.9);
+    color: ${muted};
+    padding: 4px 8px;
+}
+
 QTableWidget::item {
     padding: 8px;
     border-bottom: 1px solid rgba(${line_rgb}, 0.12);
@@ -547,6 +603,26 @@ QTableWidget::item {
 
 QTableWidget::item:selected {
     background: rgba(${blue_rgb}, 0.3);
+}
+
+QScrollBar:horizontal {
+    height: 8px;
+    background: transparent;
+    margin: 0;
+}
+
+QScrollBar::handle:horizontal {
+    background: rgba(${line_rgb}, 0.6);
+    border-radius: 4px;
+    min-width: 32px;
+}
+
+QScrollBar::add-line, QScrollBar::sub-line,
+QScrollBar::add-page, QScrollBar::sub-page {
+    background: transparent;
+    border: 0;
+    width: 0;
+    height: 0;
 }
 """
 
@@ -570,7 +646,7 @@ QScrollBar:vertical { background: #E7EEF5; } QScrollBar::handle:vertical { backg
 
 def apply_theme(theme_id: str = "obsidian", font_scale: str = "standard") -> str:
     selected = THEMES.get(theme_id, THEMES["obsidian"])
-    
+
     # Define a helper to convert hex to rgb string for QSS
     def get_rgb(hex_color):
         hex_color = hex_color.lstrip('#')
@@ -590,7 +666,7 @@ def apply_theme(theme_id: str = "obsidian", font_scale: str = "standard") -> str
         "${warning}": selected["warning"],
         "${fail}": selected["fail"],
         "${unknown}": selected["unknown"],
-        
+
         # RGBA dynamic replacements
         "${cyan_rgb}": get_rgb(selected["cyan"]),
         "${blue_rgb}": get_rgb(selected["blue"]),
@@ -613,10 +689,10 @@ def apply_theme(theme_id: str = "obsidian", font_scale: str = "standard") -> str
 
     if theme_id == "daylight":
         # Need to re-evaluate LIGHT_OVERRIDE with new color system
-        style += LIGHT_OVERRIDE 
+        style += LIGHT_OVERRIDE
     style += f"\n/* active-theme:{theme_id} */ QWidget#windowChrome {{ background-color: {selected['bg']}; }} QLabel#pageEyebrow {{ color: {selected['blue']}; }}"
     if font_scale == "large":
         style += "\n* { font-size: 14px; } QLabel#pageTitle { font-size: 29px; } QLabel#metricValue { font-size: 26px; }"
     return style
 
-STYLESHEET = apply_theme()
+STYLESHEET = apply_theme()

@@ -21,9 +21,12 @@ def send_verification_code(to_email: str, code: str, purpose: str) -> bool:
         True if the email was sent (or simulated in dev), False on SMTP failure.
     """
     settings = get_settings()
-    if settings.env != "production" or not settings.smtp_host:
+    if settings.env != "production":
         logger.info("DEV: verification code for %s = %s (purpose=%s)", to_email, code, purpose)
         return True
+    if not settings.smtp_host:
+        logger.error("smtp_not_configured to=%s purpose=%s", to_email, purpose)
+        return False
 
     purpose_labels = {"register": "注册账号", "reset_password": "重置密码"}
     label = purpose_labels.get(purpose, purpose)
