@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import CheckItem, CheckProfile, CheckReport, Code, Device, LicenseEvent, Release, User, UserSession, VerificationCode, now_iso
 from ..schemas import ActivateRequest, AuthorizeRequest, ForgotPasswordRequest, RegisterRequest, ReportIn, ResetPasswordRequest, SendCodeRequest, UserLoginRequest, UserProfileUpdate, UserRegisterRequest
-from ..security import current_device, current_user, hash_token, hasher, verify_password
+from ..security import current_device, current_user, hash_token, hasher, user_from_token, verify_password
 from ..services import DEFAULT_PROFILE, release_manifest
 from ..config import get_settings
 from ..email_utils import send_verification_code
@@ -76,10 +76,31 @@ def activate(payload: ActivateRequest, device: Device = Depends(current_device),
 
 @router.post("/authorize")
 @router.post("/authorize-check", include_in_schema=False)
-def authorize(payload: AuthorizeRequest, device: Device = Depends(current_device), db: Session = Depends(get_db)) -> dict:
+def authorize(
+    payload: AuthorizeRequest,
+    device: Device = Depends(current_device),
+    x_user_token: str | None = Header(default=None, alias="X-User-Token"),
+    db: Session = Depends(get_db),
+) -> dict:
     existing = db.get(LicenseEvent, payload.event_id)
     if existing:
         return {"authorized": True, "idempotent": True, "credits": existing.credits_after}
+    user = user_from_token(x_user_token, db)
+    if user is not None:
+        if user.profile_completed_at:
+            remaining = -1
+            access_level = "permanent"
+            expires_at = None
+        elif user.trial_expires_at and datetime.fromisoformat(user.trial_expires_at) > datetime.now(timezone.utc):
+            remaining = -1
+            access_level = "trial"
+            expires_at = user.trial_expires_at
+        else:
+            raise HTTPException(status_code=402, detail="3 天体验已结束，完善个人资料即可永久免费使用")
+        db.add(LicenseEvent(event_id=payload.event_id, device_id=device.device_id, code=None, event_type="check", credits_after=remaining))
+        db.commit()
+        return {"authorized": True, "idempotent": False, "credits": remaining, "tier": access_level.upper(), "access_level": access_level, "expires_at": expires_at}
+
     code = db.get(Code, device.license_code) if device.license_code else None
     if code:
         if code.status == "revoked" or code.credits == 0:
@@ -259,7 +280,11 @@ def auth_register(payload: UserRegisterRequest, db: Session = Depends(get_db)) -
     )
     if vc is None or datetime.fromisoformat(vc.expires_at) <= now or vc.code != payload.code:
         raise HTTPException(status_code=400, detail="验证码错误或已过期")
-    user = User(phone=payload.phone, phone_country=payload.phone_country, password_hash=hasher.hash(payload.password), email=payload.email, status="active")
+    user = User(
+        phone=payload.phone, phone_country=payload.phone_country,
+        password_hash=hasher.hash(payload.password), email=payload.email, status="active",
+        trial_granted=1, trial_expires_at=(now + timedelta(days=3)).isoformat(),
+    )
     vc.used = 1
     db.add(user)
     db.commit()
@@ -273,6 +298,9 @@ def auth_login(payload: UserLoginRequest, db: Session = Depends(get_db)) -> dict
     user = db.scalar(select(User).where(User.phone == payload.phone))
     if user is None or user.status != "active" or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="手机号或密码错误")
+    if not user.profile_completed_at and not user.trial_expires_at:
+        user.trial_granted = 1
+        user.trial_expires_at = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
     user.last_active_at = now_iso()
     db.commit()
     token = _make_user_session(db, user)
@@ -346,6 +374,8 @@ def _user_profile_view(u: "User") -> dict:
         "business_types": _parse_business_types(u.business_types), "wechat_id": u.wechat_id,
         "platform_account": u.platform_account, "profile_completed_at": u.profile_completed_at,
         "trial_granted": u.trial_granted, "trial_expires_at": u.trial_expires_at,
+        "permanent_access": bool(u.profile_completed_at),
+        "access_level": "permanent" if u.profile_completed_at else "trial",
         "status": u.status, "created_at": u.created_at, "last_active_at": u.last_active_at,
     }
 
@@ -364,7 +394,6 @@ def update_user_profile(payload: UserProfileUpdate, me: dict = Depends(current_u
     if user is None:
         raise HTTPException(status_code=404, detail="账号不存在")
     data = payload.model_dump(exclude_unset=True)
-    was_complete = _profile_is_complete(user)
     for key, value in data.items():
         if value is None:
             continue
@@ -373,10 +402,14 @@ def update_user_profile(payload: UserProfileUpdate, me: dict = Depends(current_u
         else:
             setattr(user, key, value)
     now = datetime.now(timezone.utc)
-    if not was_complete and _profile_is_complete(user) and not user.profile_completed_at:
+    if _profile_is_complete(user) and not user.profile_completed_at:
         user.profile_completed_at = now_iso()
         user.trial_granted = 1
-        user.trial_expires_at = (now + timedelta(days=3)).isoformat()
+        user.trial_expires_at = None
     user.last_active_at = now_iso()
     db.commit()
-    return {"profile": _user_profile_view(user), "trial_granted": bool(user.trial_granted)}
+    return {
+        "profile": _user_profile_view(user),
+        "trial_granted": bool(user.trial_granted),
+        "permanent_access": bool(user.profile_completed_at),
+    }

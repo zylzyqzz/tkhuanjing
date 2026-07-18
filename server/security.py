@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from .config import get_settings
 from .database import get_db
-from .models import Admin, Device
+from .models import Admin, Device, UserSession
 
 
 settings = get_settings()
@@ -124,3 +124,18 @@ def current_user(
     if not session_row:
         raise HTTPException(status_code=401, detail="登录已过期，请重新登录")
     return {"user_id": session_row.user_id, "phone": session_row.user.phone}
+
+
+def user_from_token(token: str | None, db: Session):
+    """Resolve an optional user token without taking over device authentication."""
+    if not token:
+        return None
+    now = datetime.now(timezone.utc).isoformat()
+    session_row = db.scalar(
+        select(UserSession).where(
+            UserSession.token_hash == hash_token(token),
+            UserSession.revoked == 0,
+            UserSession.expires_at > now,
+        )
+    )
+    return session_row.user if session_row else None

@@ -6,6 +6,7 @@ from .models import Release
 
 
 DISCLAIMER = "本产品仅判断电脑、网络、设备和直播软件的技术准备情况，不代表平台账号审核、流量或开播权限结果。"
+SITE_VERSION = "2.9.1"
 
 
 def _lines(value: str, fallback: list[str]) -> list[str]:
@@ -37,7 +38,6 @@ html{scroll-behavior:smooth}
 body{margin:0;background:var(--bg);color:var(--text);
     font:16px/1.7 Inter,"PingFang SC","Microsoft YaHei UI",system-ui,sans-serif;
     -webkit-font-smoothing:antialiased;overflow-x:hidden}
-canvas#fx{position:fixed;inset:0;z-index:-2}
 .gridbg{position:fixed;inset:0;z-index:-1;opacity:.06;pointer-events:none;
     background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
     background-size:56px 56px;mask-image:linear-gradient(#000,transparent 92%)}
@@ -57,10 +57,8 @@ nav .inner{width:100%;max-width:var(--wrap);margin:0 auto;
     display:flex;align-items:center;justify-content:space-between;gap:20px}
 .brand{display:inline-flex;align-items:center;gap:12px;
     font-weight:800;font-size:17px;letter-spacing:.3px;color:var(--text)}
-.brand i{display:inline-grid;place-items:center;width:34px;height:34px;
-    border-radius:10px;font-style:normal;font-size:15px;font-weight:900;
-    background:linear-gradient(135deg,var(--blue),var(--cyan));
-    color:var(--bg);box-shadow:0 8px 24px -6px rgba(78,161,255,.55)}
+.brand img{width:38px;height:38px;object-fit:cover;border-radius:10px;
+    box-shadow:0 8px 24px -6px rgba(242,199,125,.45)}
 .nav-links{display:flex;align-items:center;gap:28px;color:var(--muted);font-size:14px}
 .nav-links a{transition:color .2s}
 .nav-links a:hover{color:var(--text)}
@@ -133,8 +131,8 @@ section.block{max-width:var(--wrap);margin:0 auto;padding:72px 32px}
 .section-head p{color:var(--muted);max-width:480px;margin:0}
 h2{font-size:34px;line-height:1.2;letter-spacing:-.8px;margin:14px 0 0;font-weight:800}
 
-/* Pricing tiers */
-.tiers{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+/* Free access path */
+.tiers{display:grid;grid-template-columns:repeat(2,1fr);gap:20px}
 .tier{padding:32px 30px;border:1px solid var(--line);
     background:linear-gradient(180deg,var(--panel),var(--panel-2));
     border-radius:var(--radius-lg);position:relative;
@@ -256,7 +254,7 @@ footer .foot-links a:hover{color:var(--blue)}
     .sticky .btn{width:100%}
     nav .btn{padding:10px 16px;font-size:13px}
 }
-@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}canvas{display:none}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 """
 
 
@@ -278,10 +276,14 @@ def render_home(settings: dict[str, str], release: Release | None) -> str:
     steps = _lines(settings.get("home_steps", ""),
                    ["发现真实问题", "判断问题来源", "安全处理或给出方案", "自动复检", "判断能否开播"])
 
-    faq_raw = _safe_text(settings.get("product_faq"),
+    default_faq = (
         "为什么每天开播前都要检查？\n提前发现网络波动、设备占用、编码异常和系统配置变化。\n"
         "检测通过是否代表平台一定允许开播？\n不是，本工具只判断电脑、网络、设备和直播软件的技术准备情况。\n"
-        "软件收费吗？\n完全免费。注册即送 3 天完整功能，填写真实资料后添加客服微信可领取永久使用权。")
+        "软件收费吗？\n完全免费。注册赠送 3 天使用权限，填写完整资料后自动获得永久免费使用权限。"
+    )
+    faq_raw = _safe_text(settings.get("product_faq"), default_faq)
+    if any(word in faq_raw for word in ("付费", "续费", "套餐", "付款", "激活码")):
+        faq_raw = default_faq
     faq = _lines(faq_raw, [])
 
     version = release.version if release else "尚未发布"
@@ -318,35 +320,25 @@ def render_home(settings: dict[str, str], release: Release | None) -> str:
     )
 
     tiers_html = """
-<article class='tier'>
-    <span class='tag'>FREE · 下载即用</span>
-    <div class='price'>0<small> / 永久免费下载</small></div>
-    <p class='desc'>下载即用，无广告、无内嵌收费。</p>
+<article class='tier featured'>
+    <span class='badge'>第一步</span>
+    <span class='tag'>REGISTER · 注册即用</span>
+    <div class='price'>3<small> 天免费使用</small></div>
+    <p class='desc'>使用手机号和邮箱完成注册，立即获得完整功能。</p>
     <ul>
         <li>完整 7 组开播检查</li>
-        <li>目标地区网络实测</li>
-        <li>本地保存检测报告</li>
-    </ul>
-</article>
-<article class='tier featured'>
-    <span class='badge'>推荐</span>
-    <span class='tag'>TRIAL · 注册解锁</span>
-    <div class='price'>3<small> 天完整功能</small></div>
-    <p class='desc'>手机号注册后，填真实资料立即启用。</p>
-    <ul>
-        <li>包含全部检测能力</li>
         <li>一键配置环境</li>
         <li>历史报告同步与对比</li>
     </ul>
 </article>
 <article class='tier'>
-    <span class='tag'>PERMANENT · 联系客服</span>
-    <div class='price'>免费<small> · 永久使用权</small></div>
-    <p class='desc'>填真实资料后，加客服微信领取。</p>
+    <span class='tag'>PERMANENT · 完善资料</span>
+    <div class='price'>永久<small> · 自动生效</small></div>
+    <p class='desc'>填写公司、国家、业务类型和微信号后自动获得。</p>
     <ul>
         <li>永久免费使用</li>
         <li>持续跟进版本更新</li>
-        <li>专属技术支持</li>
+        <li>无需付款或输入激活码</li>
     </ul>
 </article>
 """
@@ -354,14 +346,14 @@ def render_home(settings: dict[str, str], release: Release | None) -> str:
     return f"""<!doctype html><html lang='zh-CN'><head>
 <meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
 <title>{esc(name)}｜开播前技术准备度检测 · 完全免费</title>
-<meta name='description' content='{esc(intro)} 完全免费，注册即送 3 天完整功能，联系客服领永久使用权。'>
+<meta name='description' content='{esc(intro)} 注册赠送 3 天使用权限，填写完整资料后永久免费。'>
 <style>{CSS}</style></head><body>
-<canvas id='fx'></canvas><div class='gridbg'></div>
+<div class='gridbg'></div>
 
 <nav><div class='inner'>
-    <a class='brand' href='/'><i>◆</i>{esc(name)}</a>
+    <a class='brand' href='/'><img src='/assets/logo.png' width='38' height='38' alt='VD Logo'>{esc(name)}</a>
     <div class='nav-links'>
-        <a href='#tiers'>免费与授权</a>
+        <a href='#tiers'>免费使用</a>
         <a href='#modes'>核心能力</a>
         <a href='#faq'>常见问题</a>
         <a class='{dl_cls}' href='{dl_href}'>下载 V{esc(version)}</a>
@@ -371,12 +363,12 @@ def render_home(settings: dict[str, str], release: Release | None) -> str:
 <main>
 <section class='hero'>
     <div>
-        <span class='eyebrow'><span class='dot'></span>完全免费 · 无广告 · 注册即用</span>
+        <span class='eyebrow'><span class='dot'></span>V{SITE_VERSION} · 注册赠送 3 天 · 完善资料永久免费</span>
         <h1>{esc(title)}<br><em>技术准备好，再点开播</em></h1>
         <p class='lead'>{esc(subtitle)}<br>{esc(intro)}</p>
         <div class='cta-row'>
             <a class='{dl_cls} btn-lg' href='{dl_href}'>免费下载 V{esc(version)} →</a>
-            <a class='btn btn-ghost btn-lg' href='#tiers'>如何领永久使用权</a>
+            <a class='btn btn-ghost btn-lg' href='#tiers'>了解免费使用规则</a>
         </div>
         <p class='cta-hint'>Windows 10 / 11 · 硬安装程序 · {esc(size)}</p>
     </div>
@@ -390,8 +382,8 @@ def render_home(settings: dict[str, str], release: Release | None) -> str:
 
 <section class='block' id='tiers'>
     <div class='section-head'>
-        <div><span class='eyebrow'>PRICING</span><h2>产品完全免费 · 三步领永久使用权</h2></div>
-        <p>下载即用，无功能限制。手机号注册送 3 天，填真实资料并添加客服微信，即可领取永久免费使用权。</p>
+        <div><span class='eyebrow'>FREE ACCESS</span><h2>注册赠送 3 天 · 完善资料永久免费</h2></div>
+        <p>不设置收费套餐、不展示付款二维码。填写完整资料后，永久免费权限自动生效。</p>
     </div>
     <div class='tiers'>{tiers_html}</div>
 </section>
@@ -467,11 +459,6 @@ def render_home(settings: dict[str, str], release: Release | None) -> str:
 
 <div class='sticky'><a class='{dl_cls}' href='{dl_href}'>免费下载 V{esc(version)}</a></div>
 
-<script>(()=>{{const c=document.querySelector('#fx');if(!c)return;const x=c.getContext('2d');let w,h,p=[],running=true;
-function size(){{w=c.width=innerWidth*devicePixelRatio;h=c.height=innerHeight*devicePixelRatio;p=Array.from({{length:Math.min(70,Math.floor(innerWidth/22))}},()=>[Math.random()*w,Math.random()*h,(Math.random()-.5)*.18*devicePixelRatio,(Math.random()-.5)*.18*devicePixelRatio]);}}
-function draw(){{if(!running)return;x.clearRect(0,0,w,h);x.fillStyle='rgba(88,201,255,.35)';for(const a of p){{a[0]+=a[2];a[1]+=a[3];if(a[0]<0||a[0]>w)a[2]*=-1;if(a[1]<0||a[1]>h)a[3]*=-1;x.beginPath();x.arc(a[0],a[1],1*devicePixelRatio,0,7);x.fill();}}requestAnimationFrame(draw);}}
-addEventListener('resize',size);document.addEventListener('visibilitychange',()=>{{running=!document.hidden;if(running)draw();}});
-if(!matchMedia('(prefers-reduced-motion:reduce)').matches){{size();draw();}}}})();</script>
 </body></html>"""
 
 

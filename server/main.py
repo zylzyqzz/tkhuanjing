@@ -92,6 +92,12 @@ def home_page(db: Session = Depends(get_db)) -> str:
     return render_home(values, release)
 
 
+@app.get("/assets/logo.png", include_in_schema=False)
+def public_logo() -> FileResponse:
+    target = Path(__file__).resolve().parents[1] / "assets" / "logo-web.png"
+    return FileResponse(target, media_type="image/png", headers={"Cache-Control": "public, max-age=604800, immutable"})
+
+
 @app.get("/download/", include_in_schema=False)
 def legacy_download_page() -> RedirectResponse:
     return RedirectResponse("/", status_code=308)

@@ -72,7 +72,7 @@ def capture_environment_snapshot(region: RegionProfile, resource_dir: Path) -> d
         "tiktok_processes": _process_names(),
         "cache_inventory": _cache_inventory(),
         "streaming_profiles": discover_streaming_profiles(),
-        "resources": {name: (resource_dir / name).exists() for name in ("收款码.jpg", "客服二维码.png", "app_icon.ico")},
+        "resources": {name: (resource_dir / name).exists() for name in ("logo.png", "客服二维码.png", "app_icon.ico")},
         "defender_status": _safe_ps("(Get-MpComputerStatus -ErrorAction SilentlyContinue).RealTimeProtectionEnabled"),
         "windows_search": _safe_ps("(Get-Service WSearch -ErrorAction SilentlyContinue).Status"),
     }

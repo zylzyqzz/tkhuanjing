@@ -328,10 +328,10 @@ def system_checks(ctx: CheckContext) -> list[CheckResult]:
 
 def client_checks(ctx: CheckContext) -> list[CheckResult]:
     from .storage import CONFIG_FILE
-    required = ["收款码.jpg", "客服二维码.png", "app_icon.ico"]
+    required = ["logo.png", "客服二维码.png", "app_icon.ico"]
     missing = [name for name in required if not (ctx.resource_dir / name).is_file()]
     return [
-        _result("client.assets", "客户端", Status.FAIL if missing else Status.PASS, "离线资源完整性", "缺少：" + "、".join(missing) if missing else "完整", evidence=["收款码、客服二维码和产品图标均随安装包部署" if not missing else f"缺少 {len(missing)} 个资源"], diagnosis="客户端资源完整" if not missing else "安装目录资源缺失", impact="资源缺失会造成支付或客服二维码无法显示。", solutions=[] if not missing else ["使用正式安装包覆盖安装"]),
+        _result("client.assets", "客户端", Status.FAIL if missing else Status.PASS, "离线资源完整性", "缺少：" + "、".join(missing) if missing else "完整", evidence=["品牌 Logo、客服二维码和产品图标均随安装包部署" if not missing else f"缺少 {len(missing)} 个资源"], diagnosis="客户端资源完整" if not missing else "安装目录资源缺失", impact="资源缺失会造成品牌图标或客服二维码无法显示。", solutions=[] if not missing else ["使用正式安装包覆盖安装"]),
         _result("client.service", "客户端", Status.PASS if ctx.api_online else Status.WARNING, "产品服务连接", "在线" if ctx.api_online else "离线", evidence=["授权、规则、报告和更新服务连接状态"], diagnosis="可以读取规则和同步产品数据" if ctx.api_online else "产品服务暂时不可用，本地检查仍可继续", impact="离线时无法激活、同步报告或检查更新。", solutions=[] if ctx.api_online else ["检查网络后重试；本地检测和历史报告仍可使用"]),
         _result("client.configuration", "客户端", Status.PASS if CONFIG_FILE.is_file() else Status.WARNING, "客户端配置文件", "完整" if CONFIG_FILE.is_file() else "缺失", evidence=[str(CONFIG_FILE)], diagnosis="客户端配置可正常读取" if CONFIG_FILE.is_file() else "配置文件缺失或尚未生成", impact="配置缺失会造成目标地区、主题和检测偏好无法保存。", solutions=[] if CONFIG_FILE.is_file() else ["重新生成安全默认配置"], repair_id="repair_client_config" if not CONFIG_FILE.is_file() else "", repair_level="safe"),
     ]

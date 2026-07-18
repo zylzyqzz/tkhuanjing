@@ -81,10 +81,11 @@ class CheckWorker(QObject):
                 self.config["device_token"] = api.token
                 license_data.update(registered.get("license", {}))
             profile.update(api.profile())
-            authorized = api.authorize(str(uuid.uuid4()))
+            authorized = api.authorize(str(uuid.uuid4()), self.config.get("user_token", ""))
             license_data.update({
                 "credits": authorized.get("credits", license_data.get("credits", -1)),
                 "expires_at": authorized.get("expires_at", license_data.get("expires_at", "")),
+                "tier": authorized.get("tier", license_data.get("tier", "FREE")),
                 "lease_until": (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(),
             })
             online = True
@@ -240,64 +241,6 @@ class SetupPlanDialog(QDialog):
         return [action for check, action in self.checks if check.isChecked()]
 
 
-class ActivationDialog(QDialog):
-    def __init__(self, parent, activate_callback) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("授权服务")
-        self.resize(820, 650)
-        self.activate_callback = activate_callback
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(28, 26, 28, 26)
-        title = QLabel("选择授权方案")
-        title.setProperty("heading", True)
-        layout.addWidget(title)
-        subtitle = QLabel("有效期内不限检测次数。点击整张套餐卡片即可选择，付款后联系客户服务获取激活码。")
-        subtitle.setProperty("muted", True)
-        layout.addWidget(subtitle)
-        packages = QHBoxLayout()
-        self.group = QButtonGroup(self)
-        self.group.setExclusive(True)
-        for index, (name, price, days) in enumerate((("月卡", "¥99", "30 天"), ("季卡", "¥288", "90 天"), ("半年卡", "¥488", "180 天"), ("年卡", "¥688", "365 天"))):
-            button = QPushButton(f"{name}\n{price}\n{days}内不限次数")
-            button.setCheckable(True)
-            button.setMinimumHeight(105)
-            self.group.addButton(button)
-            packages.addWidget(button)
-            if index == 1:
-                button.setChecked(True)
-        layout.addLayout(packages)
-        qr_row = QHBoxLayout()
-        for label, filename in (("扫码付款", "收款码.jpg"), ("联系客户服务", "客服二维码.png")):
-            pane = card()
-            box = QVBoxLayout(pane)
-            heading = QLabel(label)
-            heading.setProperty("subheading", True)
-            box.addWidget(heading)
-            image = QLabel()
-            pixmap = QPixmap(str(resource_dir() / filename))
-            image.setPixmap(pixmap.scaled(205, 205, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            image.setAlignment(Qt.AlignCenter)
-            box.addWidget(image)
-            qr_row.addWidget(pane)
-        layout.addLayout(qr_row)
-        row = QHBoxLayout()
-        self.code = QLineEdit()
-        self.code.setPlaceholderText("输入客户服务提供的激活码")
-        row.addWidget(self.code)
-        activate = QPushButton("立即激活")
-        activate.setProperty("primary", True)
-        activate.clicked.connect(self._activate)
-        row.addWidget(activate)
-        layout.addLayout(row)
-
-    def _activate(self) -> None:
-        code = self.code.text().strip()
-        if not code:
-            QMessageBox.warning(self, "请输入激活码", "请先输入客户服务提供的激活码")
-        elif self.activate_callback(code):
-            self.accept()
-
-
 class MainWindow(FramelessWindow):
     PAGE_NAMES = ["开播中心", "检测过程", "检测报告", "问题处理", "网络报告", "历史记录", "系统设置", "关于产品"]
 
@@ -321,8 +264,8 @@ class MainWindow(FramelessWindow):
         self._refresh_history()
         self._update_user_label()
         self._show_page(0)
-        if self.user.get("logged_in") and not self.user.get("profile", {}).get("trial_granted"):
-            QTimer.singleShot(1500, lambda: QMessageBox.information(self, "3 天免费试用已就绪", "完善公司名称、所在国家、业务类型和微信号，即可激活 3 天免费试用。\n试用到期后请续费开通付费会员，继续畅享全部功能。\n\n点击左下角头像按钮进入「个人中心」。"))
+        if self.user.get("logged_in") and not self.user.get("profile", {}).get("profile_completed_at"):
+            QTimer.singleShot(1500, lambda: QMessageBox.information(self, "完善资料即可永久免费", "注册后可免费使用 3 天。完善公司名称、所在国家、业务类型和微信号，即可获得永久免费使用权限。\n\n点击左下角头像按钮进入「个人中心」。"))
 
     def _build(self) -> None:
         chrome = QWidget()
@@ -419,11 +362,11 @@ class MainWindow(FramelessWindow):
         modes = QHBoxLayout()
         modes.setSpacing(22)
         daily = ModeCard("◉", "DAILY PREFLIGHT", "一键开播检查", "日常开播前使用。真实检测网络、电脑性能、直播软件与设备状态，只读取数据，不主动修改电脑环境。", "立即开始开播检查", "#43AEFF")
-        daily.setMinimumHeight(360)
+        daily.setMinimumHeight(270)
         daily.clicked.connect(lambda: self._start_check("daily_preflight"))
         modes.addWidget(daily)
         setup = ModeCard("◇", "NEW DEVICE SETUP", "一键配置环境", "新设备、更换网络、切换账号或环境异常时使用。确认后配置系统区域、刷新网络缓存并自动复检。", "开始配置新环境", "#E9AE55")
-        setup.setMinimumHeight(360)
+        setup.setMinimumHeight(270)
         setup.clicked.connect(self._start_setup)
         modes.addWidget(setup)
         layout.addLayout(modes, 4)
@@ -443,7 +386,7 @@ class MainWindow(FramelessWindow):
         hint_title = QLabel("直播准备重要提示")
         hint_title.setProperty("subheading", True)
         hint_box.addWidget(hint_title)
-        hint_text = QLabel("网络归属地、时区和区域一致性仅用于技术准备提示；软件不会承诺 IP 纯净度、账号流量或平台审核结果。\n\n注册即享 3 天免费试用，试用到期后请联系客服续费开通付费会员。")
+        hint_text = QLabel("网络归属地、时区和区域一致性仅用于技术准备提示；软件不会承诺 IP 纯净度、账号流量或平台审核结果。\n\n注册赠送 3 天使用权限，填写完整资料后即可永久免费使用。")
         hint_text.setWordWrap(True)
         hint_text.setProperty("muted", True)
         hint_box.addWidget(hint_text)
@@ -475,7 +418,13 @@ class MainWindow(FramelessWindow):
         links_box.addStretch()
         service.addWidget(links, 1)
         layout.addLayout(service)
-        return page
+        scroll = QScrollArea()
+        scroll.setObjectName("homeScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("QScrollArea#homeScroll, QScrollArea#homeScroll > QWidget > QWidget { background: transparent; border: none; }")
+        scroll.setWidget(page)
+        return scroll
 
     def _scan_page(self) -> QWidget:
         page, layout = self._shell("LIVE DIAGNOSTIC ENGINE", "直播环境核心正在运行", "检测过程与真实采样同步，任何单项异常都不会终止整轮检查。")
@@ -668,7 +617,7 @@ class MainWindow(FramelessWindow):
         page, layout = self._shell(
             "PERSONAL CENTER",
             "个人中心与授权",
-            "注册即享 3 天免费试用；试用到期后请续费开通付费会员，畅享全部功能。",
+            "注册赠送 3 天使用权限；填写完整资料后即可获得永久免费使用权限。",
         )
         self.auth_stack = QStackedWidget()
         layout.addWidget(self.auth_stack, 1)
@@ -732,7 +681,7 @@ class MainWindow(FramelessWindow):
         to_register.clicked.connect(lambda: self.auth_stack.setCurrentIndex(1))
         switch_row.addWidget(to_register)
         login_form.addLayout(switch_row)
-        trial_hint = QLabel("· 新用户注册即享 3 天免费试用\n· 试用到期后需付费开通会员，畅享全部功能")
+        trial_hint = QLabel("· 新用户注册赠送 3 天使用权限\n· 填写完整资料后即可永久免费使用")
         trial_hint.setProperty("muted", True)
         trial_hint.setWordWrap(True)
         login_form.addWidget(trial_hint)
@@ -754,10 +703,10 @@ class MainWindow(FramelessWindow):
         reg_eye = QLabel("CREATE ACCOUNT")
         reg_eye.setObjectName("pageEyebrow")
         register_form.addWidget(reg_eye)
-        reg_heading = QLabel("注册即享 3 天免费试用")
+        reg_heading = QLabel("注册赠送 3 天使用权限")
         reg_heading.setProperty("heading", True)
         register_form.addWidget(reg_heading)
-        reg_sub = QLabel("完成注册后立即解锁全部功能，试用到期后可续费开通付费会员。")
+        reg_sub = QLabel("完成注册即可使用；填写完整资料后自动获得永久免费权限。")
         reg_sub.setProperty("muted", True)
         reg_sub.setWordWrap(True)
         register_form.addWidget(reg_sub)
@@ -846,13 +795,6 @@ class MainWindow(FramelessWindow):
         self.trial_label.setWordWrap(True)
         status_left.addWidget(self.trial_label)
         status_box.addLayout(status_left, 1)
-        self.upgrade_btn = QPushButton("开通付费会员")
-        self.upgrade_btn.setProperty("gold", True)
-        self.upgrade_btn.setMinimumHeight(44)
-        self.upgrade_btn.setMinimumWidth(160)
-        self.upgrade_btn.setCursor(Qt.PointingHandCursor)
-        self.upgrade_btn.clicked.connect(self._activation)
-        status_box.addWidget(self.upgrade_btn)
         contact_hero = QPushButton("联系客服")
         contact_hero.setMinimumHeight(44)
         contact_hero.setMinimumWidth(120)
@@ -875,12 +817,9 @@ class MainWindow(FramelessWindow):
         self.pf_license_label.setProperty("subheading", True)
         license_left.addWidget(self.pf_license_label)
         license_box.addLayout(license_left, 1)
-        activate_btn = QPushButton("输入激活码")
-        activate_btn.setMinimumHeight(40)
-        activate_btn.setMinimumWidth(140)
-        activate_btn.setCursor(Qt.PointingHandCursor)
-        activate_btn.clicked.connect(self._activation)
-        license_box.addWidget(activate_btn)
+        access_note = QLabel("资料完整后自动生效，无需激活码")
+        access_note.setProperty("muted", True)
+        license_box.addWidget(access_note)
         profile_form.addWidget(license_card)
 
         # ── Profile edit form ──
@@ -922,7 +861,7 @@ class MainWindow(FramelessWindow):
         _add_field(1, 0, "所在城市", "如：上海、洛杉矶、伦敦", "edit_city")
         _add_field(1, 1, "跨境电商业务类型", "如：直播带货、跨境电商、MCN机构", "edit_biz")
         _add_field(2, 0, "邮箱", "用于找回密码和接收通知", "edit_email")
-        _add_field(2, 1, "微信号", "请输入微信号（必填以获得试用）", "edit_wechat")
+        _add_field(2, 1, "微信号", "请输入微信号（永久免费权限必填）", "edit_wechat")
         _add_field(3, 0, "平台账号", "TikTok / 其他平台账号", "edit_platform")
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)
@@ -1031,7 +970,7 @@ class MainWindow(FramelessWindow):
             self._update_user_label()
             self._show_profile_form()
             self.auth_stack.setCurrentIndex(2)
-            QMessageBox.information(self, "注册成功", "账号注册成功！请完善个人资料以激活 3 天免费试用；试用到期后需续费开通付费会员。")
+            QMessageBox.information(self, "注册成功", "账号注册成功，已赠送 3 天使用权限！填写完整个人资料后即可永久免费使用。")
         except ApiError as exc:
             if reg_error: reg_error.setText(str(exc))
 
@@ -1066,9 +1005,12 @@ class MainWindow(FramelessWindow):
         self.edit_wechat.setText(profile.get("wechat_id") or "")
         self.edit_platform.setText(profile.get("platform_account") or "")
         self.profile_heading.setText(f"已登录 · {profile.get('phone','')}")
+        permanent = profile.get("permanent_access") or profile.get("profile_completed_at")
         trial = profile.get("trial_granted")
         expires = profile.get("trial_expires_at", "")
-        if trial:
+        if permanent:
+            self.trial_label.setText("永久免费权限已生效 · 所有功能均可使用")
+        elif trial and expires:
             try:
                 from datetime import datetime, timezone
                 days = max(0, (datetime.fromisoformat(expires) - datetime.now(timezone.utc)).days)
@@ -1076,7 +1018,7 @@ class MainWindow(FramelessWindow):
             except Exception:
                 self.trial_label.setText(f"试用已激活 · 到期 {expires[:10]}")
         else:
-            self.trial_label.setText("完善公司名称、所在国家、业务类型和微信号，即可激活 3 天免费试用；试用到期后请续费开通付费会员。")
+            self.trial_label.setText("注册赠送 3 天使用权限；完善公司名称、所在国家、业务类型和微信号后即可永久免费使用。")
         self.pf_license_label.setText(f"当前授权套餐\n{self.license.get('tier','FREE')} · {self.license.get('credits','-')} 次")
         self._update_license_label()
 
@@ -1098,8 +1040,8 @@ class MainWindow(FramelessWindow):
             self.user = load_user()
             self._update_user_label()
             self._show_profile_form()
-            if response.get("trial_granted"):
-                QMessageBox.information(self, "试用已激活", "恭喜！3 天免费试用已生效，所有功能已解锁。")
+            if response.get("permanent_access"):
+                QMessageBox.information(self, "永久免费权限已生效", "资料已填写完整，永久免费使用权限已经自动生效。")
             else:
                 QMessageBox.information(self, "已保存", "个人资料已更新。")
         except ApiError as exc:
@@ -1197,7 +1139,7 @@ class MainWindow(FramelessWindow):
         return page
 
     def _about_page(self) -> QWidget:
-        page, layout = self._shell("ABOUT VD LIVE CORE", "关于 VD开播助手", "注册即享 3 天免费试用；试用到期后请联系客服续费开通付费会员。")
+        page, layout = self._shell("ABOUT VD LIVE CORE", "关于 VD开播助手", "注册赠送 3 天使用权限；填写完整资料后即可永久免费使用。")
         hero = card(); hero_box = QHBoxLayout(hero); hero_box.setContentsMargins(26, 22, 26, 22); hero_box.setSpacing(20)
         logo = QLabel(); logo.setPixmap(QPixmap(str(resource_dir() / "logo.png")).scaled(76, 76, Qt.KeepAspectRatio, Qt.SmoothTransformation)); hero_box.addWidget(logo)
         identity = QVBoxLayout(); name = QLabel(f"VD开播助手  V{APP_VERSION}"); name.setProperty("heading", True); identity.addWidget(name)
@@ -1296,7 +1238,9 @@ class MainWindow(FramelessWindow):
         self.pause_button.setEnabled(True)
         self.cancel_button.setEnabled(True)
         self.thread = QThread(self)
-        self.worker = CheckWorker(self.config, run_mode, snapshot, actions)
+        worker_config = dict(self.config)
+        worker_config["user_token"] = self.user.get("token", "")
+        self.worker = CheckWorker(worker_config, run_mode, snapshot, actions)
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.run)
         self.worker.progress.connect(self._progress)
@@ -1655,30 +1599,6 @@ class MainWindow(FramelessWindow):
         if path:
             Path(path).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    def _activation(self) -> None:
-        if not self._ensure_logged_in():
-            return
-        ActivationDialog(self, self._activate_code).exec()
-
-    def _activate_code(self, code: str) -> bool:
-        try:
-            api = ClientApi(self.config["api_base"], self.config.get("device_token", ""))
-            if not api.token:
-                data = api.register(self.config, APP_VERSION)
-                self.config["device_token"] = api.token
-                save_config(self.config)
-                self.license.update(data.get("license", {}))
-            data = api.activate(code)
-            self.license.update(data["license"])
-            self.license["lease_until"] = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
-            save_license(self.license)
-            self._update_license_label()
-            QMessageBox.information(self, "激活成功", "授权已经生效。")
-            return True
-        except ApiError as exc:
-            QMessageBox.warning(self, "激活失败", str(exc))
-            return False
-
     def _update_license_label(self) -> None:
         tier = self.license.get("tier", "FREE")
         expires = self.license.get("expires_at", "")
@@ -1760,12 +1680,12 @@ class MainWindow(FramelessWindow):
         QMessageBox.information(self, "已复制", "设备编号已复制到剪贴板。")
 
     def _show_integrity(self) -> None:
-        required = [resource_dir() / name for name in ("app_icon.ico", "收款码.jpg", "客服二维码.png")]
+        required = [resource_dir() / name for name in ("app_icon.ico", "logo.png", "客服二维码.png")]
         missing = [path.name for path in required if not path.is_file() or path.stat().st_size == 0]
         if missing:
             QMessageBox.warning(self, "完整性异常", "以下核心资源缺失：\n" + "\n".join(missing) + "\n\n请重新安装最新版。")
         else:
-            QMessageBox.information(self, "完整性检查通过", "程序图标、付款二维码和客服二维码资源均完整。")
+            QMessageBox.information(self, "完整性检查通过", "程序图标、品牌 Logo 和客服二维码资源均完整。")
 
     def _show_changelog(self) -> None:
         try:

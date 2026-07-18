@@ -58,7 +58,6 @@ QWidget#windowChrome {
     background: ${bg};
     border: 1px solid ${line};
     border-radius: 18px;
-    box-shadow: 0 5px 20px rgba(0, 0, 0, 0.4);
 }
 
 QFrame#titleBar {
@@ -132,7 +131,6 @@ QPushButton[nav="true"] {
     background: transparent;
     color: ${muted};
     font-weight: 600;
-    transition: all 0.2s ease-out;
 }
 
 QPushButton[nav="true"]:hover {
@@ -169,26 +167,18 @@ QFrame[card="true"], QFrame[metricCard="true"], QFrame[moduleTile="true"] {
     background: ${surface};
     border: 1px solid ${line};
     border-radius: 15px;
-    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
-    transition: all 0.2s ease-out;
 }
 QFrame[card="true"]:hover, QFrame[metricCard="true"]:hover, QFrame[moduleTile="true"]:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 12px 35px rgba(0, 0, 0, 0.3);
 }
 
 QFrame[modeCard="true"] {
     background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 rgba(${surface_rgb}, 0.96),stop:.65 rgba(${bg_rgb}, 0.96),stop:1 rgba(${bg_rgb}, 0.98));
     border: 1px solid rgba(${blue_rgb}, 0.28);
     border-radius: 20px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
-    transition: all 0.2s ease-out;
 }
 QFrame[modeCard="true"]:hover {
     border: 1px solid rgba(${blue_rgb}, 0.70);
     background: qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 rgba(${surface_rgb}, 0.98),stop:.65 rgba(${bg_rgb}, 0.98),stop:1 rgba(${bg_rgb}, 0.98));
-    transform: translateY(-3px);
-    box-shadow: 0 15px 45px rgba(0, 0, 0, 0.35);
 }
 
 QLabel#modeIcon {
@@ -227,12 +217,8 @@ QPushButton#modeButton {
     font-size: 14px;
     font-weight: 900;
     background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 ${blue},stop:1 ${cyan});
-    box-shadow: 0 5px 15px rgba(${blue_rgb}, 0.3);
-    transition: all 0.2s ease-out;
 }
 QPushButton#modeButton:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 25px rgba(${blue_rgb}, 0.4);
 }
 
 QLabel#metricLabel {
@@ -304,7 +290,6 @@ QPushButton {
     border-radius: 10px;
     padding: 9px 14px;
     font-weight: 600;
-    transition: all 0.15s ease-out;
 }
 
 QPushButton:hover {
@@ -324,12 +309,9 @@ QPushButton[primary="true"] {
     border: 0;
     color: ${bg};
     font-weight: 900;
-    box-shadow: 0 4px 12px rgba(${blue_rgb}, 0.4);
 }
 QPushButton[primary="true"]:hover {
     background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 ${blue},stop:1 ${cyan});
-    transform: translateY(-1px);
-    box-shadow: 0 6px 18px rgba(${blue_rgb}, 0.5);
 }
 
 QPushButton[gold="true"] {
@@ -337,23 +319,18 @@ QPushButton[gold="true"] {
     border: 0;
     color: #171005;
     font-weight: 900;
-    box-shadow: 0 4px 12px rgba(${gold_rgb}, 0.4);
 }
 QPushButton[gold="true"]:hover {
     background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 ${gold},stop:1 rgba(244, 202, 113, 1));
-    transform: translateY(-1px);
-    box-shadow: 0 6px 18px rgba(${gold_rgb}, 0.5);
 }
 
 QPushButton[danger="true"] {
     background: rgba(${fail_rgb}, 0.2);
     border-color: rgba(${fail_rgb}, 0.55);
     color: ${fail};
-    box-shadow: 0 2px 8px rgba(${fail_rgb}, 0.2);
 }
 QPushButton[danger="true"]:hover {
     background: rgba(${fail_rgb}, 0.3);
-    box-shadow: 0 3px 10px rgba(${fail_rgb}, 0.3);
 }
 
 QComboBox, QLineEdit, QTextEdit, QSpinBox {
@@ -367,7 +344,6 @@ QComboBox, QLineEdit, QTextEdit, QSpinBox {
 
 QComboBox:focus, QLineEdit:focus, QTextEdit:focus, QSpinBox:focus {
     border-color: ${blue};
-    box-shadow: 0 0 0 2px rgba(${blue_rgb}, 0.2);
 }
 
 QComboBox::drop-down {
@@ -390,7 +366,6 @@ QTabWidget#settingsTabs::pane {
     border: 1px solid ${line};
     border-radius: 14px;
     top: -1px;
-    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
 }
 
 QWidget#settingsPage {
@@ -406,7 +381,6 @@ QTabBar::tab {
     min-width: 110px;
     border-top-left-radius: 10px;
     border-top-right-radius: 10px;
-    transition: all 0.15s ease-out;
 }
 
 QTabBar::tab:first {
@@ -468,7 +442,6 @@ QFrame[problemCard="true"] {
     background: rgba(${surface_rgb}, 0.94);
     border: 1px solid rgba(${line_rgb}, 0.23);
     border-radius: 15px;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
 }
 
 QFrame[problemCard="true"][severity="FAIL"] {
@@ -504,7 +477,6 @@ QLabel[caption="true"] {
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 1px;
-    text-transform: uppercase;
     padding-top: 2px;
 }
 

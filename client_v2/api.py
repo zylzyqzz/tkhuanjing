@@ -41,8 +41,9 @@ class ClientApi:
     def activate(self, code: str) -> dict:
         return self.request("POST", "/api/v1/client/activate", json={"code": code})
 
-    def authorize(self, event_id: str) -> dict:
-        return self.request("POST", "/api/v1/client/authorize", json={"event_id": event_id})
+    def authorize(self, event_id: str, user_token: str = "") -> dict:
+        headers = {"X-User-Token": user_token} if user_token else {}
+        return self.request("POST", "/api/v1/client/authorize", json={"event_id": event_id}, headers=headers)
 
     def upload_report(self, report: dict) -> dict:
         return self.request("POST", "/api/v1/client/reports", json=report)

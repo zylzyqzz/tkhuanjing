@@ -78,6 +78,22 @@ def test_user_registration_requires_a_valid_email_code(tmp_path):
         payload["code"] = "123456"
         registered = client.post("/api/v1/client/auth/register", json=payload)
         assert registered.status_code == 200 and registered.json()["token"]
+        user_token = registered.json()["token"]
+        assert registered.json()["user"]["trial_expires_at"]
+        _, device_headers = register(client, "DEVICE-USER-ACCESS")
+        access_headers = {**device_headers, "X-User-Token": user_token}
+        trial_access = client.post("/api/v1/client/authorize", headers=access_headers, json={"event_id": "USER-TRIAL-1"})
+        assert trial_access.status_code == 200
+        assert trial_access.json()["access_level"] == "trial"
+        profile_headers = {"Authorization": f"Bearer {user_token}"}
+        completed = client.put("/api/v1/client/user/profile", headers=profile_headers, json={
+            "company_name": "测试公司", "country": "中国", "business_types": ["直播带货"], "wechat_id": "test-wechat",
+        })
+        assert completed.status_code == 200 and completed.json()["permanent_access"] is True
+        permanent_access = client.post("/api/v1/client/authorize", headers=access_headers, json={"event_id": "USER-PERMANENT-1"})
+        assert permanent_access.status_code == 200
+        assert permanent_access.json()["access_level"] == "permanent"
+        assert permanent_access.json()["expires_at"] is None
         assert client.post("/api/v1/client/auth/register", json=payload).status_code == 409
 
 

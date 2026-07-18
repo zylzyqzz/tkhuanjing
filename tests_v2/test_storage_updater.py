@@ -44,7 +44,7 @@ def test_signed_manifest_validation():
 
 
 def test_client_resource_check_and_plugin_isolation(tmp_path, monkeypatch):
-    for name in ("收款码.jpg", "客服二维码.png", "app_icon.ico"):
+    for name in ("logo.png", "客服二维码.png", "app_icon.ico"):
         (tmp_path / name).write_bytes(b"asset")
     class Api: base_url = "http://localhost"
     context = CheckContext({}, get_region("us-los-angeles"), "localhost", Api(), tmp_path, "2.3.0", False, __import__('threading').Event())
