@@ -1,0 +1,70 @@
+name: Build Windows Client
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: admin/package-lock.json
+
+      - name: Install Python dependencies
+        run: python -m pip install ".[test,build]"
+
+      - name: Run automated tests
+        run: python -m pytest
+
+      - name: Build admin assets
+        working-directory: admin
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build Windows executables
+        run: |
+          python -m PyInstaller --noconfirm --clean --distpath dist_client_v2 --workpath build_client_product client_v2.spec
+          python -m PyInstaller --noconfirm --clean --distpath dist_updater_v2 --workpath build_updater_product updater_v2.spec
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { $iscc = "C:\Program Files\Inno Setup 6\ISCC.exe" }
+          & $iscc installer_v2_product.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup build failed" }
+
+      - name: Create checksums
+        shell: pwsh
+        run: |
+          Get-FileHash dist_setup_v2\*.exe -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $([IO.Path]::GetFileName($_.Path))" } | Set-Content dist_setup_v2\SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VD-Live-Assistant-Windows-2.9.1
+          path: |
+            dist_setup_v2/*.exe
+            dist_setup_v2/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
