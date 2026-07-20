@@ -16,6 +16,7 @@ CONFIG_FILE = DATA_DIR / "config-v2.json"
 LICENSE_FILE = DATA_DIR / "license-v2.json"
 USER_FILE = DATA_DIR / "user-v2.json"
 QUEUE_FILE = DATA_DIR / "pending-sync.json"
+EVENT_QUEUE_FILE = DATA_DIR / "pending-device-events.json"
 CREDENTIAL_FILE = DATA_DIR / "credentials-v2.json"
 
 DEFAULT_CONFIG = {
@@ -211,6 +212,23 @@ def update_queued_report(report_id: str, *, success: bool, error: str = "") -> N
             if item.get("report_id") == report_id:
                 item["attempts"] = int(item.get("attempts", 0)) + 1; item["last_error"] = error[:500]
     atomic_json(QUEUE_FILE, queue)
+
+
+def queue_device_event(event: dict) -> None:
+    queue = load_json(EVENT_QUEUE_FILE, [])
+    if not any(item.get("event_id") == event.get("event_id") for item in queue if isinstance(item, dict)):
+        queue.append({**event, "attempts": 0})
+        atomic_json(EVENT_QUEUE_FILE, queue[-500:])
+
+
+def pending_device_events(limit: int = 100) -> list[dict]:
+    return [item for item in load_json(EVENT_QUEUE_FILE, []) if isinstance(item, dict)][:limit]
+
+
+def acknowledge_device_events(event_ids: list[str]) -> None:
+    accepted = set(event_ids)
+    queue = [item for item in load_json(EVENT_QUEUE_FILE, []) if isinstance(item, dict) and item.get("event_id") not in accepted]
+    atomic_json(EVENT_QUEUE_FILE, queue)
 
 
 # ── User session ──────────────────────────────────────────────

@@ -16,7 +16,8 @@ class ClientApi:
 
     def request(self, method: str, path: str, **kwargs) -> dict:
         headers = kwargs.pop("headers", {})
-        if self.token:
+        use_token = kwargs.pop("use_token", True)
+        if self.token and use_token:
             headers["Authorization"] = f"Bearer {self.token}"
         try:
             with httpx.Client(base_url=self.base_url, timeout=httpx.Timeout(12, connect=5), headers={"User-Agent": f"VDLiveCheck/{APP_VERSION}", **headers}) as client:
@@ -51,6 +52,38 @@ class ClientApi:
 
     def upload_report(self, report: dict) -> dict:
         return self.request("POST", "/api/v1/client/reports", json=report)
+
+    def bind_enterprise(self, code: str) -> dict:
+        return self.request("POST", "/api/v1/client/bind-enterprise", json={"code": code})
+
+    def heartbeat(self, payload: dict) -> dict:
+        return self.request("POST", "/api/v1/client/heartbeat", json=payload)
+
+    def upload_events(self, events: list[dict]) -> dict:
+        return self.request("POST", "/api/v1/client/events", json={"events": events})
+
+    def enterprise_login(self, username: str, password: str) -> dict:
+        return self.request("POST", "/api/v2/auth/login", json={"username": username, "password": password}, use_token=False)
+
+    def enterprise_options(self, member_token: str) -> dict:
+        return self.request("GET", "/api/v2/organization/options", headers={"Authorization": f"Bearer {member_token}"}, use_token=False)
+
+    def v2_binding(self, member_token: str = "") -> dict:
+        headers = {"X-Device-Token": self.token}
+        if member_token: headers["Authorization"] = f"Bearer {member_token}"
+        return self.request("GET", "/api/v2/device/binding", headers=headers, use_token=False)
+
+    def v2_bind(self, member_token: str, payload: dict) -> dict:
+        return self.request("PUT", "/api/v2/device/binding", json=payload, headers={"Authorization": f"Bearer {member_token}", "X-Device-Token": self.token}, use_token=False)
+
+    def v2_unbind(self, member_token: str, reason: str) -> dict:
+        return self.request("DELETE", "/api/v2/device/binding", json={"reason": reason}, headers={"Authorization": f"Bearer {member_token}", "X-Device-Token": self.token}, use_token=False)
+
+    def v2_heartbeat(self, payload: dict) -> dict:
+        return self.request("POST", "/api/v2/device/heartbeat", json=payload, headers={"X-Device-Token": self.token}, use_token=False)
+
+    def v2_device_config(self) -> dict:
+        return self.request("GET", "/api/v2/device/config", headers={"X-Device-Token": self.token}, use_token=False)
 
     def update_info(self) -> dict:
         return self.request("GET", "/api/v1/client/update")

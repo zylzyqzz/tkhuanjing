@@ -14,11 +14,11 @@ from ..api import ApiError, ClientApi
 from ..checks import CheckContext, DEFAULT_PROFILE, run_checks, system_checks
 from ..events import CheckEvent
 from ..errors import normalize_error
-from ..live_studio import find_live_studio, launch_live_studio
+from ..live_studio import find_live_studio, launch_live_studio, live_studio_process_state
 from ..models import CheckReport
 from ..regions import get_region
 from ..state import ClientState, StateMachine
-from ..storage import QUEUE_FILE, REPORT_DIR, load_config, load_credentials, load_json, load_license, load_reports, load_user, queue_report, save_config, save_credentials, save_license, save_report, update_queued_report
+from ..storage import QUEUE_FILE, REPORT_DIR, acknowledge_device_events, load_config, load_credentials, load_json, load_license, load_reports, load_user, pending_device_events, queue_device_event, queue_report, save_config, save_credentials, save_license, save_report, update_queued_report
 from ..system_repair import RepairResult, run_system_repair
 from ..updater import download_update, launch_helper
 from .screens.home_screen import HomeScreen
@@ -29,6 +29,8 @@ from .title_bar import TitleBar
 from .tokens import ANIM_SLOW, APP_STYLESHEET, WINDOW_H, WINDOW_W
 from .account_dialog import AccountDialog
 from .history_dialog import HistoryDialog
+from .enterprise_binding_dialog import EnterpriseBindingDialog
+from ..agent.heartbeat import flush_once as flush_v2_heartbeat
 
 
 def _assets() -> Path:
@@ -90,7 +92,7 @@ class UpdateWorker(QObject):
 
 class AppWindow(QWidget):
     def __init__(self):
-        super().__init__(); self.config = load_config(); self.report: CheckReport | None = None; self.thread: QThread | None = None; self.worker = None; self.repair_events = []; self.machine=StateMachine(ClientState.IDLE); self.update_thread=None; self.update_worker=None
+        super().__init__(); self.config = load_config(); self.report: CheckReport | None = None; self.thread: QThread | None = None; self.worker = None; self.repair_events = []; self.machine=StateMachine(ClientState.IDLE); self.update_thread=None; self.update_worker=None; self._heartbeat_running=False; self._v2_heartbeat_running=False; self._last_studio_state="unknown"
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window); self.setAttribute(Qt.WA_TranslucentBackground); self.setFixedSize(WINDOW_W, WINDOW_H); self.setStyleSheet(APP_STYLESHEET)
         root = QVBoxLayout(self); root.setContentsMargins(0,0,0,0); chrome = QWidget(); chrome.setObjectName("chrome"); root.addWidget(chrome); shell = QVBoxLayout(chrome); shell.setContentsMargins(0,0,0,0); shell.setSpacing(0); shell.addWidget(TitleBar(self))
         middle = QHBoxLayout(); middle.setContentsMargins(0,0,0,0); middle.setSpacing(0); self.sidebar = Sidebar(); self.sidebar.selected.connect(self._navigate); middle.addWidget(self.sidebar)
@@ -101,11 +103,13 @@ class AppWindow(QWidget):
         history = load_reports(1)
         if history: self.home.last_result.setText(f"上次检测：{history[0].get('conclusion','已完成')}")
         QTimer.singleShot(2500,self._retry_upload_queue)
+        self.heartbeat_timer=QTimer(self); self.heartbeat_timer.setInterval(30000); self.heartbeat_timer.timeout.connect(self._heartbeat); self.heartbeat_timer.start(); QTimer.singleShot(3500,self._heartbeat)
+        self.v2_heartbeat_timer=QTimer(self); self.v2_heartbeat_timer.setInterval(20000); self.v2_heartbeat_timer.timeout.connect(self._v2_heartbeat); self.v2_heartbeat_timer.start(); QTimer.singleShot(5000,self._v2_heartbeat)
 
     def _settings_page(self):
         page = QWidget(); layout = QVBoxLayout(page); layout.setContentsMargins(40,24,40,24); title = QLabel("设置"); title.setProperty("title",True); layout.addWidget(title)
         account=QFrame(); account.setProperty("card",True); account_form=QFormLayout(account); user=load_user(); self.account_status=QLabel("已登录" if user.get("logged_in") else "未登录"); account_form.addRow("账号状态",self.account_status); login=QPushButton("打开账号中心"); login.clicked.connect(self._open_account); account_form.addRow("",login); layout.addWidget(account)
-        card=QFrame(); card.setProperty("card",True); form=QFormLayout(card); self.live_path=QLineEdit(self.config.get("live_studio_path","")); form.addRow("TikTok LIVE Studio 路径",self.live_path); find=QPushButton("自动查找"); find.clicked.connect(self._find_live); form.addRow("",find); update=QPushButton("检查软件更新"); update.clicked.connect(self.check_update); form.addRow("",update); save=QPushButton("保存设置"); save.setProperty("primary",True); save.clicked.connect(self._save_settings); form.addRow("",save); layout.addWidget(card); layout.addStretch(); return page
+        card=QFrame(); card.setProperty("card",True); form=QFormLayout(card); self.live_path=QLineEdit(self.config.get("live_studio_path","")); form.addRow("TikTok LIVE Studio 路径",self.live_path); find=QPushButton("自动查找"); find.clicked.connect(self._find_live); form.addRow("",find); enterprise=QPushButton("企业、直播间、账号与主播绑定"); enterprise.clicked.connect(self._open_enterprise_binding); form.addRow("企业运营",enterprise); self.enterprise_code=QLineEdit(); self.enterprise_code.setPlaceholderText("旧版6位设备绑定码（兼容）"); form.addRow("旧版绑定",self.enterprise_code); bind=QPushButton("兼容绑定"); bind.clicked.connect(self._bind_enterprise); form.addRow("",bind); update=QPushButton("检查软件更新"); update.clicked.connect(self.check_update); form.addRow("",update); save=QPushButton("保存设置"); save.setProperty("primary",True); save.clicked.connect(self._save_settings); form.addRow("",save); layout.addWidget(card); layout.addStretch(); return page
 
     def _about_page(self):
         page=QWidget(); layout=QVBoxLayout(page); layout.setContentsMargins(40,32,40,32); title=QLabel("关于 VD Nexus"); title.setProperty("title",True); layout.addWidget(title); card=QFrame(); card.setProperty("card",True); box=QVBoxLayout(card); text=QLabel(f"VD开播助手 V{APP_VERSION}\n\n面向 TikTok 直播的网络环境、系统环境和电脑性能检测工具。\n\n不读取账号密码、Cookie、个人文件或直播素材；缓存清理仅处理白名单临时目录。"); text.setWordWrap(True); box.addWidget(text); layout.addWidget(card); layout.addStretch(); return page
@@ -120,11 +124,13 @@ class AppWindow(QWidget):
         if self.machine.busy or (self.thread and self.thread.isRunning()): return
         if self.machine.state not in {ClientState.IDLE,ClientState.READY,ClientState.CHECKED,ClientState.NEEDS_REPAIR,ClientState.FAILED,ClientState.CANCELLED}: self.machine=StateMachine(ClientState.IDLE)
         self.machine.transition(ClientState.CHECKING); self._apply_state()
+        self._send_event("check_started")
         self.config["target_region_id"] = self.home.region.currentData(); save_config(self.config); self.scan.reset(False); self.stack.setCurrentWidget(self.scan); self._run_worker(CheckWorker(self.config), self._check_done)
 
     def start_repair(self):
         if self.machine.busy or (self.thread and self.thread.isRunning()): return
         self.machine.transition(ClientState.REPAIRING); self._apply_state()
+        self._send_event("repair_started")
         self.scan.reset(True); self.stack.setCurrentWidget(self.scan); self._run_worker(RepairWorker(get_region(self.config.get("target_region_id"))), self._repair_done)
 
     def _run_worker(self, worker, done):
@@ -155,7 +161,7 @@ class AppWindow(QWidget):
 
     def _show_result(self): self.stack.setCurrentWidget(self.result); self.sidebar.select("report")
     def _failed(self,message):
-        cancelled="已取消" in message; self.machine.transition(ClientState.CANCELLED if cancelled else ClientState.FAILED); self._apply_state(); QMessageBox.information(self,"已取消",message) if cancelled else QMessageBox.critical(self,"操作未完成",message); self.stack.setCurrentWidget(self.home)
+        cancelled="已取消" in message; self.machine.transition(ClientState.CANCELLED if cancelled else ClientState.FAILED); self._apply_state(); self._send_event("check_failed", "warning", {"message": message[:300]}) if not cancelled else None; QMessageBox.information(self,"已取消",message) if cancelled else QMessageBox.critical(self,"操作未完成",message); self.stack.setCurrentWidget(self.home)
     def cancel(self):
         if self.worker and hasattr(self.worker,"cancelled"): self.worker.cancelled.set()
 
@@ -207,6 +213,66 @@ class AppWindow(QWidget):
     def _find_live(self):
         path=find_live_studio(self.live_path.text()); self.live_path.setText(str(path) if path else ""); QMessageBox.information(self,"自动查找",f"已找到：{path}" if path else "未找到 TikTok LIVE Studio")
     def _save_settings(self): self.config["live_studio_path"]=self.live_path.text().strip(); save_config(self.config); QMessageBox.information(self,"设置","已保存")
+    def _bind_enterprise(self):
+        code=self.enterprise_code.text().strip()
+        if not code: return
+        try:
+            credentials=load_credentials(); api=ClientApi(self.config["api_base"],credentials.get("device_token",""))
+            if not api.token:
+                api.register(self.config,APP_VERSION); save_credentials(device_token=api.token)
+            result=api.bind_enterprise(code); self.enterprise_code.clear(); QMessageBox.information(self,"绑定成功",f"已加入企业：{result['tenant']['name']}"); self._heartbeat()
+        except Exception as exc: QMessageBox.warning(self,"绑定失败",normalize_error(exc).display())
+
+    def _open_enterprise_binding(self): EnterpriseBindingDialog(self).exec()
+
+    def _v2_heartbeat(self):
+        if self._v2_heartbeat_running: return
+        self._v2_heartbeat_running=True
+        threading.Thread(target=self._flush_v2_safely,daemon=True,name="v2-device-heartbeat").start()
+
+    def _flush_v2_safely(self):
+        try: flush_v2_heartbeat()
+        except Exception: pass
+        finally: self._v2_heartbeat_running=False
+
+    def _presence_payload(self):
+        state_map={ClientState.CHECKING:"checking",ClientState.REPAIRING:"repairing",ClientState.RECHECKING:"rechecking",ClientState.READY:"ready",ClientState.NEEDS_REPAIR:"risk",ClientState.FAILED:"failed"}
+        readiness="unknown"
+        if self.report: readiness="blocked" if self.report.blocking_count else "incomplete" if self.report.readiness_level=="INCOMPLETE" else "warning" if self.report.high_risk_count else "ready"
+        summary={}
+        if self.report:
+            for category,prefix in (("network","network."),("system",("system.","environment.")),("performance","performance.")):
+                prefixes=(prefix,) if isinstance(prefix,str) else prefix; items=[x for x in self.report.items if x.check_id.startswith(prefixes)]; statuses=[x.status for x in items]; status="FAIL" if "FAIL" in statuses else "WARNING" if "WARNING" in statuses else "UNKNOWN" if "UNKNOWN" in statuses else "PASS"; summary[category]={"status":status,"issues":sum(x in {"FAIL","WARNING"} for x in statuses)}
+        return {"client_at":datetime.now(timezone.utc).isoformat(),"app_version":APP_VERSION,"live_state":state_map.get(self.machine.state,"idle"),"readiness_state":readiness,"studio_state":live_studio_process_state(),"target_region_id":self.config.get("target_region_id",""),"last_report_id":self.report.report_id if self.report else None,"last_report_at":self.report.checked_at if self.report else None,"module_summary":summary}
+
+    def _heartbeat(self):
+        if self._heartbeat_running: return
+        credentials=load_credentials()
+        if not credentials.get("device_token"): return
+        self._heartbeat_running=True
+        def send():
+            try:
+                api=ClientApi(self.config["api_base"],credentials["device_token"]); payload=self._presence_payload(); api.heartbeat(payload)
+                pending=pending_device_events()
+                if pending:
+                    clean=[{k:v for k,v in item.items() if k!="attempts"} for item in pending]; result=api.upload_events(clean); acknowledge_device_events(result.get("accepted",[]))
+                studio=payload["studio_state"]
+                if studio!=self._last_studio_state and self._last_studio_state!="unknown": self._send_event("studio_started" if studio=="running" else "studio_stopped")
+                self._last_studio_state=studio
+            except Exception: pass
+            finally: self._heartbeat_running=False
+        threading.Thread(target=send,daemon=True,name="enterprise-heartbeat").start()
+
+    def _send_event(self,event_type,severity="info",payload=None):
+        credentials=load_credentials()
+        if not credentials.get("device_token"): return
+        event={"event_id":str(uuid.uuid4()),"event_type":event_type,"severity":severity,"client_at":datetime.now(timezone.utc).isoformat(),"payload":payload or {}}
+        queue_device_event(event)
+        def send():
+            try:
+                result=ClientApi(self.config["api_base"],credentials["device_token"]).upload_events([event]); acknowledge_device_events(result.get("accepted",[]))
+            except Exception: pass
+        threading.Thread(target=send,daemon=True,name="enterprise-event").start()
     def _open_account(self):
         dialog=AccountDialog(self); dialog.session_changed.connect(lambda user:self.account_status.setText("已登录" if user.get("logged_in") else "未登录")); dialog.exec()
     def _apply_state(self):

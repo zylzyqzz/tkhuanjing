@@ -57,3 +57,14 @@ def launch_live_studio(custom_path: str = "") -> Path:
         raise FileNotFoundError("未检测到 TikTok LIVE Studio")
     subprocess.Popen([str(path)], cwd=str(path.parent), close_fds=True)
     return path
+
+
+def live_studio_process_state() -> str:
+    """Return process state only; this never inspects account or stream content."""
+    if os.name != "nt":
+        return "not_running"
+    try:
+        result = powershell("@(Get-Process -ErrorAction SilentlyContinue | Where-Object {$_.ProcessName -match 'TikTok.*LIVE|LIVE.*Studio'}).Count")
+        return "running" if int(result.strip() or "0") > 0 else "not_running"
+    except Exception:
+        return "unknown"
