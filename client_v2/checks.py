@@ -19,7 +19,7 @@ from .models import CheckResult, Status
 from .network_intelligence import lookup_public_ip, measure_throughput, tls_probe
 from .provider_knowledge import assess_provider
 from .regions import RegionProfile
-from .streaming_config import discover_streaming_profiles
+from .streaming_config import discover_streaming_profiles  # compatibility only; not used by network checks
 
 
 DEFAULT_PROFILE = {
@@ -85,8 +85,6 @@ def _priority(check_id: str, status: Status) -> str:
         return "BLOCKING" if status == Status.FAIL else "ADVISORY"
     if check_id.startswith("network."):
         return "ADVISORY"
-    if check_id.startswith(("performance.", "devices.")):
-        return "INFORMATIONAL"
     return "INFORMATIONAL"
 
 
@@ -191,21 +189,15 @@ def network_checks(ctx: CheckContext) -> list[CheckResult]:
     variation = speed.get("upload_variation_percent")
     latency = speed.get("latency_ms")
     jitter = speed.get("jitter_ms")
-    stream_profiles = discover_streaming_profiles()
-    bitrates = [x["bitrate_kbps"] for x in stream_profiles if x.get("bitrate_kbps")]
-    bitrate = max(bitrates) if bitrates else None
     baseline_required = float(ctx.profile.get("min_upload_mbps", 8.0))
-    required = max(baseline_required, bitrate / 1000 * float(ctx.profile["upload_multiplier"])) if bitrate else baseline_required
+    required = baseline_required
     if upload is None:
         speed_status = Status.UNKNOWN
     else:
         unstable = variation is not None and variation > 50
         speed_status = Status.PASS if upload >= required and not unstable else Status.WARNING if upload >= max(5.0, required * .7) else Status.FAIL
     evidence = [f"下载中位数：{download if download is not None else '未完成'} Mbps", f"稳定上传：{upload if upload is not None else '未完成'} Mbps", f"空载延迟：{latency if latency is not None else '未完成'} ms", f"抖动中位数：{jitter if jitter is not None else '未完成'} ms", f"上传波动：{variation if variation is not None else '样本不足'}%"]
-    if bitrate:
-        evidence.append(f"直播软件实测配置码率：{bitrate} Kbps，建议稳定上传 ≥ {required:.1f} Mbps")
-    else:
-        evidence.append(f"未读取到直播软件码率，按通用直播稳定上传基线 {baseline_required:.1f} Mbps 判定")
+    evidence.append(f"按通用直播稳定上传基线 {baseline_required:.1f} Mbps 判定")
     rows.append(_result(
         "network.throughput", "网络环境", speed_status, "上下行速度与直播承载", f"↓ {download or 0:.1f} / ↑ {upload or 0:.1f} Mbps",
         evidence=evidence,
@@ -217,12 +209,18 @@ def network_checks(ctx: CheckContext) -> list[CheckResult]:
 
 
 def performance_checks(ctx: CheckContext) -> list[CheckResult]:
+    cpu_name = os.environ.get("PROCESSOR_IDENTIFIER", "")
+    if os.name == "nt":
+        try:
+            cpu_name = powershell("(Get-CimInstance Win32_Processor | Select-Object -First 1 -ExpandProperty Name)") or cpu_name
+        except Exception:
+            pass
     cpu = psutil.cpu_percent(interval=1)
     memory = psutil.virtual_memory()
     disk = psutil.disk_usage(Path.home().anchor)
     rows = [
-        _result("performance.cpu", "电脑性能", Status.WARNING if cpu >= 80 else Status.PASS, "CPU 实时占用", f"{cpu:.0f}%", evidence=[f"1 秒采样占用 {cpu:.0f}%"], diagnosis="CPU 负载正常" if cpu < 80 else "后台负载可能挤占直播编码资源", impact="持续高负载可能造成编码过载和掉帧，仅作为兼容性参考。", solutions=[] if cpu < 80 else ["关闭非直播高占用程序后复检"], metrics={"percent": cpu}),
-        _result("performance.memory", "电脑性能", Status.WARNING if memory.percent >= 85 else Status.PASS, "内存占用", f"{memory.percent:.0f}%", evidence=[f"可用 {memory.available / 2**30:.1f} GB"], diagnosis="可用内存正常" if memory.percent < 85 else "可用内存偏低", impact="内存不足可能引起卡顿，仅作为兼容性参考。", solutions=[] if memory.percent < 85 else ["关闭非直播程序"], metrics={"percent": memory.percent}),
+        _result("performance.cpu", "电脑性能", Status.WARNING if cpu >= 80 else Status.PASS, "CPU 与实时占用", f"{cpu:.0f}%", evidence=[cpu_name or "CPU 型号未读取", f"1 秒采样占用 {cpu:.0f}%"], diagnosis="CPU 负载正常" if cpu < 80 else "后台负载可能挤占直播编码资源", impact="持续高负载可能造成编码过载和掉帧，仅作为性能建议。", solutions=[] if cpu < 80 else ["关闭非直播高占用程序后复检"], metrics={"percent": cpu, "model": cpu_name}),
+        _result("performance.memory", "电脑性能", Status.WARNING if memory.percent >= 85 else Status.PASS, "物理内存与占用", f"{memory.percent:.0f}%", evidence=[f"总计 {memory.total / 2**30:.1f} GB", f"可用 {memory.available / 2**30:.1f} GB"], diagnosis="可用内存正常" if memory.percent < 85 else "可用内存偏低", impact="内存不足可能引起卡顿，仅作为性能建议。", solutions=[] if memory.percent < 85 else ["关闭非直播程序"], metrics={"percent": memory.percent, "total_gb": memory.total / 2**30}),
         _result("performance.disk", "电脑性能", Status.WARNING if disk.free / 2**30 < ctx.profile["min_free_disk_gb"] else Status.PASS, "系统盘空间", f"{disk.free / 2**30:.1f} GB", evidence=[f"建议至少 {ctx.profile['min_free_disk_gb']} GB"], diagnosis="磁盘空间充足" if disk.free / 2**30 >= ctx.profile["min_free_disk_gb"] else "系统盘空间偏低", impact="空间偏低可能影响缓存或录制，仅作为参考。", solutions=["方便时清理系统盘"] if disk.free / 2**30 < ctx.profile["min_free_disk_gb"] else [], metrics={"free_gb": disk.free / 2**30}),
     ]
     try:
@@ -266,13 +264,13 @@ def system_checks(ctx: CheckContext) -> list[CheckResult]:
     try:
         timezone = powershell("(Get-TimeZone).Id")
         match = timezone == region.windows_timezone
-        rows.append(_result("system.timezone", "系统环境", Status.PASS if match else Status.WARNING, "系统时区与目标地区", timezone, evidence=[f"当前时区：{timezone}", f"目标时区：{region.windows_timezone}"], diagnosis="系统时区与目标直播地区一致" if match else "系统时区与所选目标地区不一致", impact="时区不一致可能影响直播软件时间、日志和登录环境一致性。", solutions=[] if match else [f"在配置环境模式中确认后切换到 {region.label} 对应时区"], repair_id="", repair_level="manual"))
+        rows.append(_result("system.timezone", "系统环境", Status.PASS if match else Status.FAIL, "系统时区与目标地区", timezone, evidence=[f"当前时区：{timezone}", f"目标时区：{region.windows_timezone}"], diagnosis="系统时区与目标直播地区一致" if match else "系统时区与所选目标地区不一致", impact="时区不一致可能影响直播软件时间、日志和登录环境一致性。", solutions=[] if match else [f"一键修复为 {region.label} 对应时区"], repair_id="set_target_timezone" if not match else "", repair_level="safe"))
     except Exception as exc:
         rows.append(_result("system.timezone", "系统环境", Status.UNKNOWN, "系统时区与目标地区", "未读取", evidence=[str(exc)], diagnosis="无法读取 Windows 时区", impact="无法完成地区一致性判断。", solutions=["检查 Windows 时间和语言设置"]))
     try:
         scheme = powershell("powercfg /getactivescheme")
         high = any(x in scheme.lower() for x in ("high performance", "高性能", "ultimate"))
-        rows.append(_result("system.power", "系统环境", Status.PASS if high else Status.WARNING, "电源模式", "高性能" if high else "非高性能", evidence=[scheme], diagnosis="电源策略适合持续直播" if high else "节能策略可能限制 CPU/GPU 持续性能", impact="节能降频可能造成长时间直播编码波动。", solutions=[] if high else ["切换高性能电源模式并自动复检"], repair_id="high_performance" if not high else "", repair_level="confirm"))
+        rows.append(_result("system.power", "系统环境", Status.PASS if high else Status.FAIL, "电源模式", "高性能" if high else "非高性能", evidence=[scheme], diagnosis="电源策略适合持续直播" if high else "节能策略可能限制 CPU/GPU 持续性能", impact="节能降频可能造成长时间直播编码波动。", solutions=[] if high else ["一键切换高性能电源模式"], repair_id="high_performance" if not high else "", repair_level="safe"))
     except Exception as exc:
         rows.append(_result("system.power", "系统环境", Status.UNKNOWN, "电源模式", "未读取", evidence=[str(exc)], diagnosis="无法读取电源模式", impact="无法确认持续性能策略。"))
     try:
@@ -280,13 +278,13 @@ def system_checks(ctx: CheckContext) -> list[CheckResult]:
         values = re.findall(r"0x([0-9a-fA-F]+)", sleep)
         ac_seconds = int(values[-1], 16) if values else -1
         disabled = ac_seconds == 0
-        rows.append(_result("system.sleep", "系统环境", Status.PASS if disabled else Status.WARNING if ac_seconds > 0 else Status.UNKNOWN, "接通电源睡眠策略", "已关闭" if disabled else f"{ac_seconds // 60} 分钟" if ac_seconds > 0 else "未读取", evidence=["直播期间建议接通电源且不自动睡眠"], diagnosis="长时间直播不会因系统睡眠中断" if disabled else "电脑可能在直播期间进入睡眠", impact="睡眠会直接中断推流、采集和网络连接。", solutions=[] if disabled else ["确认后关闭接通电源时的睡眠和休眠"], repair_id="disable_sleep" if ac_seconds > 0 else "", repair_level="confirm"))
+        rows.append(_result("system.sleep", "系统环境", Status.PASS if disabled else Status.FAIL if ac_seconds > 0 else Status.UNKNOWN, "接通电源睡眠策略", "已关闭" if disabled else f"{ac_seconds // 60} 分钟" if ac_seconds > 0 else "未读取", evidence=["直播期间建议接通电源且不自动睡眠"], diagnosis="长时间直播不会因系统睡眠中断" if disabled else "电脑可能在直播期间进入睡眠", impact="睡眠会直接中断推流、采集和网络连接。", solutions=[] if disabled else ["一键关闭接通电源时的睡眠和休眠"], repair_id="disable_sleep" if ac_seconds > 0 else "", repair_level="safe"))
     except Exception as exc:
         rows.append(_result("system.sleep", "系统环境", Status.UNKNOWN, "接通电源睡眠策略", "未读取", evidence=[str(exc)], diagnosis="无法读取睡眠策略", impact="请在 Windows 电源设置中人工确认。"))
     try:
         status = powershell("(Get-Service W32Time).Status")
         running = status.lower() == "running"
-        rows.append(_result("system.time_sync", "系统环境", Status.PASS if running else Status.WARNING, "Windows 时间同步", status, evidence=[f"W32Time 服务：{status}"], diagnosis="时间同步服务运行正常" if running else "时间同步服务未运行", impact="系统时间偏差可能造成连接证书或登录验证异常。", solutions=[] if running else ["启动时间服务并立即同步"], repair_id="sync_time" if not running else "", repair_level="safe"))
+        rows.append(_result("system.time_sync", "系统环境", Status.PASS if running else Status.FAIL, "Windows 时间同步", status, evidence=[f"W32Time 服务：{status}"], diagnosis="时间同步服务运行正常" if running else "时间同步服务未运行", impact="系统时间偏差可能造成连接证书或登录验证异常。", solutions=[] if running else ["启动时间服务并立即同步"], repair_id="sync_time" if not running else "", repair_level="safe"))
     except Exception as exc:
         rows.append(_result("system.time_sync", "系统环境", Status.UNKNOWN, "Windows 时间同步", "未读取", evidence=[str(exc)], diagnosis="无法读取时间服务", impact="无法验证系统时间同步状态。"))
     try:
@@ -294,38 +292,36 @@ def system_checks(ctx: CheckContext) -> list[CheckResult]:
         locale = powershell("(Get-WinSystemLocale).Name")
         matched = culture.lower() == region.culture.lower() and locale.lower() == region.culture.lower()
         rows.append(_result(
-            "system.region_consistency", "系统环境", Status.PASS if matched else Status.WARNING,
+            "system.region_consistency", "系统环境", Status.PASS if matched else Status.FAIL,
             "Windows 地区与区域格式", f"{culture} / {locale}",
             evidence=[f"区域格式：{culture}", f"系统区域：{locale}", f"目标：{region.culture}"],
             diagnosis="Windows 区域设置与目标地区一致" if matched else "Windows 区域设置与目标地区存在差异",
             impact="区域不一致可能影响日期、语言和直播软件本地化行为，但不代表平台风控结论。",
-            solutions=[] if matched else ["在一键配置环境中预览并确认区域修改"],
+            solutions=[] if matched else ["一键修复区域格式和系统区域"], repair_id="set_region" if not matched else "", repair_level="safe",
             metrics={"culture": culture, "system_locale": locale, "target": region.culture},
         ))
     except Exception as exc:
         rows.append(_result("system.region_consistency", "系统环境", Status.UNKNOWN, "Windows 地区与区域格式", "未读取", evidence=[str(exc)], diagnosis="无法读取 Windows 区域设置", impact="无法完成环境一致性判断。"))
     try:
         processes = powershell("(Get-Process | Where-Object {$_.Name -match 'TikTok|obs|LiveStudio'} | Select-Object -ExpandProperty Name -Unique) -join ', '")
-        rows.append(_result("environment.tiktok_processes", "系统环境", Status.WARNING if processes else Status.PASS, "直播相关进程", processes or "未占用", evidence=[f"活动进程：{processes or '无'}"], diagnosis="检测到直播软件正在运行" if processes else "未发现直播程序占用", impact="配置环境时活动进程可能锁定配置或缓存；日常检查不会关闭它们。", solutions=[] if not processes else ["仅在配置环境模式中确认后关闭"], metrics={"processes": processes.split(", ") if processes else []}))
+        rows.append(_result("environment.tiktok_processes", "系统环境", Status.WARNING if processes else Status.PASS, "TikTok LIVE Studio 进程", processes or "未占用", evidence=[f"活动进程：{processes or '无'}"], diagnosis="检测到直播软件正在运行" if processes else "未发现直播程序占用", impact="修复系统环境时活动进程可能锁定缓存。", solutions=[] if not processes else ["一键修复时自动关闭"], repair_id="close_tiktok_processes" if processes else "", repair_level="safe", metrics={"processes": processes.split(", ") if processes else []}))
     except Exception as exc:
         rows.append(_result("environment.tiktok_processes", "系统环境", Status.UNKNOWN, "直播相关进程", "未读取", evidence=[str(exc)], diagnosis="进程检测未完成", impact="无法确认配置文件是否被占用。"))
     cache_root = Path(os.environ.get("LOCALAPPDATA", "")) / "TikTok LIVE Studio" / "Cache"
     try:
         files = [p for p in cache_root.rglob("*") if p.is_file()] if cache_root.exists() else []
         total = sum(p.stat().st_size for p in files)
-        rows.append(_result("environment.tiktok_cache", "系统环境", Status.WARNING if total > 1_000_000_000 else Status.PASS, "TikTok 临时缓存", f"{total / 2**20:.1f} MB", evidence=[f"路径：{cache_root}", f"文件：{len(files)} 个"], diagnosis="已完成缓存目录盘点", impact="过大的临时缓存可能占用磁盘，但不应在日常检查中自动删除。", solutions=["在配置环境模式中核对路径和大小后清理"] if total > 1_000_000_000 else [], metrics={"path": str(cache_root), "files": len(files), "bytes": total}))
+        rows.append(_result("environment.tiktok_cache", "系统环境", Status.WARNING if total > 1_000_000_000 else Status.PASS, "TikTok LIVE Studio 临时缓存", f"{total / 2**20:.1f} MB", evidence=[f"路径：{cache_root}", f"文件：{len(files)} 个"], diagnosis="已完成白名单缓存目录盘点", impact="过大的临时缓存可能占用磁盘并影响软件启动。", solutions=["一键修复时只清理白名单临时文件"] if total > 1_000_000_000 else [], repair_id="clean_tiktok_cache" if total > 1_000_000_000 else "", repair_level="safe", metrics={"path": str(cache_root), "files": len(files), "bytes": total}))
     except OSError as exc:
         rows.append(_result("environment.tiktok_cache", "系统环境", Status.UNKNOWN, "TikTok 临时缓存", "未读取", evidence=[str(exc)], diagnosis="缓存盘点未完成", impact="未对直播数据做任何删除。"))
     try:
         dns = powershell("(Get-DnsClientServerAddress -AddressFamily IPv4 | Where-Object {$_.ServerAddresses} | ForEach-Object {$_.ServerAddresses}) -join ', '")
-        rows.append(_result("environment.dns_arp", "系统环境", Status.PASS if dns else Status.UNKNOWN, "DNS 与 ARP 网络缓存", dns or "未识别 DNS", evidence=[f"DNS：{dns or '未识别'}", "ARP 为本机动态缓存"], diagnosis="已读取网络解析配置", impact="缓存异常可能导致解析延迟，刷新缓存不会更换网络 IP。", solutions=["如出现解析异常，可安全刷新 DNS 与 ARP"], repair_id="reset_network_cache", repair_level="safe", metrics={"dns_servers": dns}))
+        expected = {region.preferred_dns, region.alternate_dns}
+        configured = {part.strip() for part in dns.split(",") if part.strip()}
+        matched = expected.issubset(configured)
+        rows.append(_result("environment.dns_arp", "系统环境", Status.PASS if matched else Status.FAIL, "DNS 与 ARP 网络缓存", dns or "未识别 DNS", evidence=[f"当前 DNS：{dns or '未识别'}", f"目标 DNS：{region.preferred_dns}, {region.alternate_dns}"], diagnosis="DNS 配置符合目标地区" if matched else "DNS 与目标地区推荐配置不一致", impact="DNS 或缓存异常可能导致解析延迟。", solutions=[] if matched else ["一键配置活动物理网卡 DNS 并刷新缓存"], repair_id="configure_dns" if not matched else "", repair_level="safe", metrics={"dns_servers": dns, "target_dns": sorted(expected)}))
     except Exception as exc:
         rows.append(_result("environment.dns_arp", "系统环境", Status.UNKNOWN, "DNS 与 ARP 网络缓存", "未读取", evidence=[str(exc)], diagnosis="网络缓存检查未完成", impact="不影响其他检查项继续。"))
-    try:
-        services = powershell("$s=(Get-Service WSearch -ErrorAction SilentlyContinue).Status; $d=(Get-MpComputerStatus -ErrorAction SilentlyContinue).RealTimeProtectionEnabled; \"Search=$s; Defender=$d\"")
-        rows.append(_result("environment.security_services", "系统环境", Status.PASS, "Windows Search 与 Defender", services, evidence=[services, "本工具只检测，不关闭安全服务"], diagnosis="已记录系统服务状态", impact="安全软件可能影响个别文件操作，但不应为此自动降低系统保护。", solutions=["如直播软件明确被拦截，请按其官方说明添加精确放行规则"], metrics={"raw": services}))
-    except Exception as exc:
-        rows.append(_result("environment.security_services", "系统环境", Status.UNKNOWN, "Windows Search 与 Defender", "未读取", evidence=[str(exc)], diagnosis="系统服务状态未完成", impact="本工具没有对安全服务做修改。"))
     return rows
 
 
@@ -341,9 +337,9 @@ def client_checks(ctx: CheckContext) -> list[CheckResult]:
 
 
 PLUGINS = [
-    CheckPlugin("network", "网络环境", 90, network_checks), CheckPlugin("performance", "电脑性能", 30, performance_checks),
-    CheckPlugin("devices", "直播设备", 25, device_checks), CheckPlugin("streaming", "直播软件", 20, streaming_checks),
-    CheckPlugin("system", "系统环境", 30, system_checks), CheckPlugin("client", "客户端", 10, client_checks),
+    CheckPlugin("network",   "网络环境", 90, network_checks),
+    CheckPlugin("system",    "系统环境", 30, system_checks),
+    CheckPlugin("performance", "电脑性能", 30, performance_checks),
 ]
 
 
@@ -380,6 +376,44 @@ def run_checks(ctx: CheckContext, progress: Callable[[int, str], None]) -> list[
     progress(100, "检查完成")
     emit(ctx.event_sink, "check_finished", "all", "检查完成，正在生成一致性报告", level="success", progress=100)
     return results
+
+
+def run_repair_all(target_timezone: str = "") -> tuple[bool, str, list]:
+    """
+    一键修复所有可自动处理的系统环境问题。
+    按顺序执行：时区 -> 电源 -> 睡眠 -> 时间同步 -> DNS缓存。
+    不需要用户确认，直接执行。
+    返回 (成功与否, 汇总消息, 每个修复的结果列表)。
+    """
+    results = []
+    ordered_repairs = [
+        ("set_target_timezone", "系统时区", target_timezone),
+        ("high_performance", "高性能电源模式", ""),
+        ("disable_sleep", "关闭睡眠和休眠", ""),
+        ("sync_time", "Windows 时间同步", ""),
+        ("reset_network_cache", "DNS 与 ARP 缓存", ""),
+    ]
+    success_count = 0
+    messages = []
+    for repair_id, title, tz in ordered_repairs:
+        ok, msg, recovery = run_repair(repair_id, target_timezone=tz)
+        results.append({"repair_id": repair_id, "title": title, "ok": ok, "message": msg, "recovery": recovery})
+        if ok:
+            success_count += 1
+            messages.append(f"✓ {title}：{msg}")
+        else:
+            messages.append(f"✕ {title}：{msg}")
+    summary = f"完成 {success_count}/{len(ordered_repairs)} 项修复" if success_count < len(ordered_repairs) else "全部修复完成"
+    return (success_count == len(ordered_repairs), summary, results)
+
+
+ALL_SYSTEM_REPAIRS = [
+    ("set_target_timezone", "系统时区"),
+    ("high_performance", "高性能电源模式"),
+    ("disable_sleep", "关闭睡眠和休眠"),
+    ("sync_time", "Windows 时间同步"),
+    ("reset_network_cache", "DNS 与 ARP 缓存"),
+]
 
 
 def run_repair(repair_id: str, *, target_timezone: str = "") -> tuple[bool, str, dict]:

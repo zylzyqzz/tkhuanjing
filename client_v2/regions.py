@@ -12,6 +12,8 @@ class RegionProfile:
     iana_timezone: str
     culture: str
     group: str
+    preferred_dns: str = "1.1.1.1"
+    alternate_dns: str = "1.0.0.1"
 
     @property
     def probes(self) -> tuple[str, ...]:

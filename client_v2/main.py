@@ -10,7 +10,13 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from . import APP_NAME
 from .storage import configure_logging
-from .ui.main_window import MainWindow, resource_dir
+from pathlib import Path
+
+from .ui.app_window import AppWindow
+
+
+def resource_dir() -> Path:
+    return Path(__file__).resolve().parents[1] / "assets"
 
 
 def main() -> int:
@@ -24,7 +30,7 @@ def main() -> int:
         QMessageBox.critical(None, "程序发生异常", "程序遇到未处理问题，详细信息已写入本地日志。\n请重新启动或联系技术支持。")
 
     sys.excepthook = handle_exception
-    window = MainWindow(); window.show(); return app.exec()
+    window = AppWindow(); window.show(); return app.exec()
 
 
 if __name__ == "__main__":

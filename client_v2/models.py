@@ -20,15 +20,7 @@ PRIORITIES = {"BLOCKING", "HIGH_RISK", "ADVISORY", "INFORMATIONAL"}
 # broadcast. Network quality, provider intelligence, and hardware readings are
 # advisory by design: they must be explained and recorded, never treated as a
 # binary eligibility gate.
-LAUNCH_BLOCKING_CHECKS = {
-    "streaming.launch",
-    "streaming.configuration_integrity",
-    "system.clock_integrity",
-    "network.proxy_connectivity",
-    "network.dns_connectivity",
-    "devices.required_capture_permission",
-    "devices.required_microphone_permission",
-}
+LAUNCH_BLOCKING_CHECKS: set[str] = set()
 
 
 @dataclass(slots=True)
@@ -68,12 +60,12 @@ class CheckResult:
             self.priority = "INFORMATIONAL"
         # Never trust a caller-supplied priority/blocking flag. Launch blocking
         # is a small auditable allow-list of deterministic software failures.
-        self.blocking = self.check_id in LAUNCH_BLOCKING_CHECKS and self.status == Status.FAIL
+        self.blocking = self.check_id.startswith(("system.", "environment.")) and self.status == Status.FAIL
         if self.blocking:
             self.priority = "BLOCKING"
         elif self.check_id.startswith("network."):
             self.priority = "ADVISORY"
-        elif self.check_id.startswith(("performance.", "devices.")):
+        elif self.check_id.startswith("performance."):
             self.priority = "INFORMATIONAL"
         elif self.status in {Status.FAIL, Status.WARNING}:
             self.priority = "ADVISORY"
@@ -123,9 +115,13 @@ class CheckReport:
 
     def finalize(self) -> None:
         self.blocking_count = sum(1 for item in self.items if item.blocking and item.status == Status.FAIL)
+        system_incomplete = any(item.status == Status.UNKNOWN and item.check_id.startswith(("system.", "environment.")) for item in self.items)
         self.high_risk_count = sum(1 for item in self.items if item.check_id.startswith("network.") and item.status in {Status.FAIL, Status.WARNING})
         advisory_risk = any(item.priority == "ADVISORY" and item.status in {Status.FAIL, Status.WARNING} for item in self.items)
-        if self.blocking_count:
+        if system_incomplete:
+            self.readiness_level, self.overall_status = "INCOMPLETE", Status.UNKNOWN
+            self.conclusion = "系统环境检测未完成，暂不建议开播"
+        elif self.blocking_count:
             self.readiness_level, self.overall_status = "NOT_READY", Status.FAIL
             self.conclusion = f"当前不建议开播 · {self.blocking_count} 个阻断问题需要先处理"
         elif self.high_risk_count or advisory_risk:
@@ -149,7 +145,7 @@ class CheckReport:
             self.network_summary = "建议关注"
         else:
             self.network_summary = "稳定"
-        hardware_items = [i for i in self.items if i.check_id.startswith(("performance.", "devices."))]
+        hardware_items = [i for i in self.items if i.check_id.startswith("performance.")]
         self.hardware_summary = "参考建议" if any(i.status != Status.PASS for i in hardware_items) else "正常"
         self.next_action = "先修复电脑环境并复测" if self.blocking_count else "持续测试或联系服务商" if self.network_summary in {"建议关注", "建议联系服务商或更换线路"} else "可以直接开播"
         self.source_health = self.source_health or {"unknown_items": unknown, "total_items": len(self.items), "healthy": unknown == 0}
@@ -177,7 +173,7 @@ class CheckReport:
             "hardware_summary": self.hardware_summary, "next_action": self.next_action,
             "overall_status": self.overall_status.value, "conclusion": self.conclusion,
             "uploaded": self.uploaded, "items": [x.to_dict() for x in self.items],
-            "disclaimer": "本报告仅判断电脑、网络、设备和直播软件的技术准备情况，不代表平台账号审核、流量或开播权限结果。",
+            "disclaimer": "本报告仅说明网络环境、系统环境和电脑性能，不代表平台账号审核、流量或开播权限结果。",
         }
 
 
@@ -188,6 +184,4 @@ def _issue_tags(item: CheckResult) -> list[str]:
         return ["电脑环境异常" if item.status == Status.FAIL else "电脑环境建议"]
     if item.check_id.startswith("network."):
         return ["网络问题" if item.status == Status.FAIL else "网络待关注" if item.status == Status.WARNING else "网络待核实"]
-    if item.check_id.startswith(("performance.", "devices.")):
-        return ["硬件参考"]
     return ["其他待关注"]

@@ -361,7 +361,7 @@ class MainWindow(FramelessWindow):
         layout.addLayout(target_row)
         modes = QHBoxLayout()
         modes.setSpacing(22)
-        daily = ModeCard("◉", "DAILY PREFLIGHT", "一键开播检查", "日常开播前使用。真实检测网络、电脑性能、直播软件与设备状态，只读取数据，不主动修改电脑环境。", "立即开始开播检查", "#43AEFF")
+        daily = ModeCard("◉", "DAILY PREFLIGHT", "一键开播检查", "日常开播前使用。检测网络环境和系统环境，只读取数据，不主动修改电脑环境。", "立即开始开播检查", "#43AEFF")
         daily.setMinimumHeight(270)
         daily.clicked.connect(lambda: self._start_check("daily_preflight"))
         modes.addWidget(daily)
@@ -456,7 +456,6 @@ class MainWindow(FramelessWindow):
         self.module_tiles: dict[str, ModuleTile] = {}
         module_defs = [
             ("network", "IP", "IP 与网络质量"), ("system", "OS", "Windows 环境"),
-            ("performance", "CPU", "电脑性能与编码"), ("devices", "DEV", "直播设备与插件"),
             ("streaming", "LIVE", "直播软件参数"), ("client", "APP", "客户端完整性"),
         ]
         for module_id, icon, name in module_defs:
@@ -483,7 +482,7 @@ class MainWindow(FramelessWindow):
         self.report_conclusion.setWordWrap(True)
         self.report_conclusion.setProperty("muted", True)
         summary_box.addWidget(self.report_conclusion, 1)
-        self.repair_all_button = QPushButton("一键处理安全问题")
+        self.repair_all_button = QPushButton("一键修复系统环境")
         self.repair_all_button.setProperty("primary", True)
         self.repair_all_button.clicked.connect(self._repair_all)
         self.repair_all_button.setEnabled(False)
@@ -492,16 +491,18 @@ class MainWindow(FramelessWindow):
         outcome_row = QHBoxLayout()
         self.environment_outcome = MetricCard("电脑环境", "尚未检测")
         self.network_outcome = MetricCard("网络情况", "尚未检测")
-        self.hardware_outcome = MetricCard("硬件兼容", "仅供参考")
+        self.computer_perf_info = QLabel("电脑性能：仅供参考")
+        self.computer_perf_info.setProperty("muted", True)
+        self.computer_perf_info.setWordWrap(True)
         self.next_action_outcome = MetricCard("下一步建议", "完成检测后生成")
-        for widget in (self.environment_outcome, self.network_outcome, self.hardware_outcome, self.next_action_outcome):
+        for widget in (self.environment_outcome, self.network_outcome, self.next_action_outcome):
             outcome_row.addWidget(widget)
         layout.addLayout(outcome_row)
         metric_row = QHBoxLayout()
         self.report_metrics = {
             "ip": MetricCard("公网 IP", "--"), "down": MetricCard("下载速度", "--", "Mbps"),
             "up": MetricCard("稳定上传", "--", "Mbps"), "latency": MetricCard("目标延迟", "--", "ms"),
-            "problems": MetricCard("风险与异常", "0", "项"),
+            "problems": MetricCard("需关注项目", "0", "项"),
         }
         for widget in self.report_metrics.values():
             metric_row.addWidget(widget)
@@ -1340,11 +1341,12 @@ class MainWindow(FramelessWindow):
         self.report_conclusion.setText(f"{report.conclusion}\n{report.blocking_count} 个电脑环境阻断项 · {report.high_risk_count} 个网络建议 · {counts[Status.PASS]} 项正常 · {counts[Status.UNKNOWN]} 项待核实{comparison}")
         self.environment_outcome.set_value(report.environment_summary)
         self.network_outcome.set_value(report.network_summary)
-        self.hardware_outcome.set_value(report.hardware_summary)
+        self._update_computer_performance_info(report)
         self.next_action_outcome.set_value(report.next_action)
         problems = [item for item in report.items if item.status != Status.PASS]
         safe = [item for item in problems if item.repairable and item.repair_level == "safe"]
-        self.repair_all_button.setEnabled(bool(safe))
+        has_system_repair = any(item.repair_id and item.check_id.startswith(('system.', 'environment.')) for item in problems)
+        self.repair_all_button.setEnabled(has_system_repair)
         self.report_metrics["problems"].set_value(str(len(problems)))
         ip = report.ip_profile
         self.report_metrics["ip"].set_value(str(ip.get("ip") or "--"))
@@ -1363,6 +1365,8 @@ class MainWindow(FramelessWindow):
                 item.widget().deleteLater()
         categories: dict[str, list[CheckResult]] = {}
         for result in report.items:
+            if result.check_id.startswith(("performance.", "devices.")):
+                continue
             categories.setdefault(result.category, []).append(result)
         for index, (category, items) in enumerate(categories.items()):
             pane = card()
@@ -1556,16 +1560,36 @@ class MainWindow(FramelessWindow):
         QMessageBox.warning(self, "自动处理未完成", f"{message}\n\n请按照问题卡片中的步骤人工处理后复检。")
         return False
 
+    def _update_computer_performance_info(self, report):
+        perf_items = [i for i in report.items if i.check_id.startswith(("performance.", "devices."))]
+        if perf_items:
+            cpu = next((i for i in perf_items if i.check_id == "performance.cpu"), None)
+            mem = next((i for i in perf_items if i.check_id == "performance.memory"), None)
+            lines = []
+            if cpu: lines.append(f"CPU：{cpu.value}")
+            if mem: lines.append(f"内存：{mem.value}")
+            self.computer_perf_info.setText("电脑性能说明：" + " · ".join(lines))
+        else:
+            self.computer_perf_info.setText("电脑性能：本次检测不提供详细硬件数据，仅供参考。")
+
     def _repair_all(self) -> None:
-        if not self.current_report:
-            return
-        items = [item for item in self.current_report.items if item.status != Status.PASS and item.repairable and item.repair_id and item.repair_level == "safe"]
-        if not items:
-            QMessageBox.information(self, "没有安全修复项", "当前问题需要确认修改或人工处理。")
-            return
-        success = sum(self._repair_item(item, recheck=False) for item in items)
-        QMessageBox.information(self, "安全处理完成", f"已处理 {success}/{len(items)} 个安全项目，即将执行完整复检。")
-        QTimer.singleShot(250, lambda: self._start_check("daily_preflight"))
+        from ..checks import run_repair_all
+        region = get_region(self.config.get("target_region_id"))
+        self._show_page(1)
+        self.scan_core.start()
+        self.scan_status.setText("正在一键修复系统环境…")
+        self.terminal.clear()
+        self.terminal.append_event(CheckEvent("repair_started", "setup", "开始一键修复系统环境", "warning"))
+        ok, summary, results = run_repair_all(target_timezone=region.windows_timezone)
+        for r in results:
+            level = "success" if r["ok"] else "fail"
+            self.terminal.append_event(CheckEvent("repair_finished", "setup", f"{r['title']}：{r['message']}", level))
+        self.scan_core.finish("PASS" if ok else "FAIL")
+        self.scan_status.setText(f"修复完成 · {summary}")
+        detail = "所有项目修复成功，可以正常开播。" if ok else "部分项目可能需要管理员权限或手动处理。"
+        QMessageBox.information(self, "一键修复完成", f"{summary}\n\n{detail}")
+        if ok:
+            QTimer.singleShot(500, lambda: self._start_check("daily_preflight"))
 
     def _upload_report(self) -> None:
         if not self.current_report:

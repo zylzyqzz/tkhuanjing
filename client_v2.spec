@@ -8,5 +8,5 @@ a = Analysis(
     excludes=["tkinter", "pytest", "sqlalchemy", "fastapi", "alembic"], noarchive=False,
 )
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="VDLiveCheck", debug=False, bootloader_ignore_signals=False, strip=False, upx=False, console=False, icon=str(root / "assets" / "app_icon.ico"))
+exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="VDLiveCheck", debug=False, bootloader_ignore_signals=False, strip=False, upx=False, console=False, uac_admin=True, icon=str(root / "assets" / "app_icon.ico"))
 coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="VDLiveCheck")

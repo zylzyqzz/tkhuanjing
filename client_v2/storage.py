@@ -25,7 +25,7 @@ DEFAULT_CONFIG = {
     "result_sound": True, "auto_open_report": True, "update_check_on_start": True,
     "report_retention_days": 90, "upload_confirm": True,
     "startup_page": "home", "remember_last_page": False, "last_page": 0,
-    "show_check_tips": True, "auto_compare_reports": True,
+    "show_check_tips": False, "auto_compare_reports": True, "live_studio_path": "",
 }
 
 
