@@ -1,0 +1,9 @@
+<script setup lang="ts">
+import{onMounted,ref}from'vue';import{api,session}from'../api';import StatusPill from'../components/StatusPill.vue'
+const rows=ref<any[]>([]),message=ref(''),canManage=session.permissions.includes('alerts.manage')
+async function load(){rows.value=(await api('/tk-api/enterprise/alerts')).alerts}
+async function setStatus(id:number,status:string){await api(`/tk-api/enterprise/alerts/${id}`,{method:'POST',body:JSON.stringify({status})});load()}
+async function toWorkOrder(x:any){await api('/tk-api/enterprise/work-orders',{method:'POST',body:JSON.stringify({alert_id:x.id,device_id:x.device_id,title:x.title,priority:x.severity==='critical'?'critical':'medium',status:'open',owner:'',notes:`根因分类：${x.root_cause||'待分析'}`,resolution:''})});await setStatus(x.id,'processing');message.value='已转为工单，可前往故障工单继续处理';setTimeout(()=>message.value='',3000)}
+onMounted(load)
+</script>
+<template><section class="panel"><header class="panel-head"><div><span class="eyebrow">INCIDENT CENTER</span><h2>告警与根因中心</h2><p>合并重复故障，记录确认、处理和恢复全过程。</p></div></header><div v-if="message" class="success-banner">{{message}}</div><div class="alert-list"><article v-for="x in rows" class="alert-card" :class="x.severity"><div class="alert-icon">!</div><div><header><b>{{x.title}}</b><StatusPill :value="x.status"/></header><p>设备 {{x.device_id}} · 根因 {{x.root_cause||'待分析'}} · 已发生 {{x.occurrence_count}} 次</p><small>最近发生 {{x.last_seen_at?.replace('T',' ').slice(0,19)}}</small></div><div v-if="canManage" class="alert-actions"><button @click="setStatus(x.id,'acknowledged')">确认</button><button @click="toWorkOrder(x)">转工单</button><button class="primary" @click="setStatus(x.id,'resolved')">标记解决</button></div></article><div v-if="!rows.length" class="empty-state success-empty">当前没有企业告警，设备运行平稳。</div></div></section></template>

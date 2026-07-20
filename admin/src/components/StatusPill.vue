@@ -1,0 +1,2 @@
+<script setup lang="ts">defineProps<{value:string|boolean}>();const labels:any={true:'在线',false:'离线',ready:'可以开播',blocked:'系统阻断',warning:'存在风险',unknown:'待检测',running:'LIVE Studio 运行中',not_running:'未运行',crashed:'异常退出',idle:'空闲',checking:'检测中',repairing:'修复中',rechecking:'复检中'};</script>
+<template><span class="status-pill" :class="String(value)"><i></i>{{labels[String(value)]||value}}</span></template>
