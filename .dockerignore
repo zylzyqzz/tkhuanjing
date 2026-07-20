@@ -19,6 +19,7 @@ client_v2
 !client_v2/
 client_v2/*
 !client_v2/__init__.py
+!client_v2/product.py
 !client_v2/regions.py
 assets
 !assets/
