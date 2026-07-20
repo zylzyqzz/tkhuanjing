@@ -1,7 +1,7 @@
 """Single source of product and wire-contract metadata."""
 
 APP_NAME = "VD开播助手"
-APP_VERSION = "2.10.0"
+APP_VERSION = "2.1.0"
 REPORT_SCHEMA_VERSION = 6
 UPDATE_CHANNEL = "stable"
 SUPPORTED_REPORT_SCHEMAS = frozenset({4, 5, 6})

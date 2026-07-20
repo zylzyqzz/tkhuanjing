@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vd-live-check"
-version = "2.10.0"
+version = "2.1.0"
 description = "VD 开播助手 · TikTok 直播开播前技术准备度检测系统"
 requires-python = ">=3.12,<3.14"
 dependencies = [

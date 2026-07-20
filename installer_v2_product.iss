@@ -1,5 +1,5 @@
 #define MyAppName "VD 开播助手"
-#define MyAppVersion "2.10.0"
+#define MyAppVersion "2.1.0"
 #define MyAppExeName "VDLiveCheck.exe"
 
 [Setup]
@@ -12,7 +12,7 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=dist_setup_v2
-OutputBaseFilename=VD开播助手安装程序-2.10.0
+OutputBaseFilename=VD开播助手安装程序-2.1.0
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -22,7 +22,7 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 CloseApplications=yes
 RestartApplications=yes
 ArchitecturesAllowed=x64compatible
-VersionInfoVersion=2.10.0.0
+VersionInfoVersion=2.1.0.0
 VersionInfoProductName={#MyAppName}
 VersionInfoCompany=VD 开播助手
 

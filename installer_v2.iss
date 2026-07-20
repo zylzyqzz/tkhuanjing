@@ -1,5 +1,5 @@
 #define MyAppName "维度 TikTok 直播开播助手"
-#define MyAppVersion "2.10.0"
+#define MyAppVersion "2.1.0"
 #define MyAppExeName "TKLiveCheck.exe"
 
 [Setup]

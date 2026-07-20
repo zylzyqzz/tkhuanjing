@@ -1,4 +1,4 @@
-# VD Nexus V2.10
+# VD Nexus V2.1
 
 VD Nexus 是面向 TikTok 电脑直播的开播前环境检测工具。当前版本只生成三类结果：
 

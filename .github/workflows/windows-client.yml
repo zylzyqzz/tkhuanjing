@@ -59,7 +59,7 @@ jobs:
         run: |
           python -m compileall -q client_v2 server tests_v2
           $version = python -c "from client_v2.product import APP_VERSION; print(APP_VERSION)"
-          if ($version -ne "2.10.0") { throw "Unexpected product version: $version" }
+          if ($version -ne "2.1.0") { throw "Unexpected product version: $version" }
           if (Select-String -Path client_v2\**\*.py,server\**\*.py -Pattern 'ghp_[A-Za-z0-9]{20,}|Zyl@' -Quiet) { throw "Potential secret in source" }
 
       - name: Build admin assets
@@ -104,7 +104,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: VD-Live-Assistant-Windows-2.10.0
+          name: VD-Live-Assistant-Windows-2.1.0
           path: |
             dist_setup_v2/*.exe
             dist_setup_v2/SHA256SUMS.txt

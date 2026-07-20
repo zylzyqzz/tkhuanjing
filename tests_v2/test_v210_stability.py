@@ -12,7 +12,7 @@ from server.schemas import ReportIn
 
 
 def test_single_version_and_schema_source():
-    assert APP_VERSION == "2.10.0"
+    assert APP_VERSION == "2.1.0"
     assert REPORT_SCHEMA_VERSION == 6
     assert CheckReport("d", APP_VERSION, []).to_dict()["schema_version"] == REPORT_SCHEMA_VERSION
 
