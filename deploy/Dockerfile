@@ -13,9 +13,11 @@ RUN pip install --no-cache-dir --timeout 45 --retries 5 \
 
 COPY server /app/server
 COPY client_v2/__init__.py client_v2/product.py client_v2/regions.py /app/client_v2/
+COPY alembic.ini /app/alembic.ini
+COPY migrations /app/migrations
 COPY admin/dist /app/admin/dist
 COPY assets/logo-web.png /app/assets/logo-web.png
 
 EXPOSE 8000
 
-CMD ["uvicorn", "server.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips=*"]
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn server.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=*"]

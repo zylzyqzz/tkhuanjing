@@ -1,0 +1,22 @@
+services:
+  postgres-staging:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: vd_nexus_staging
+      POSTGRES_USER: vd_nexus
+      POSTGRES_PASSWORD: ${TK_POSTGRES_PASSWORD:?TK_POSTGRES_PASSWORD is required}
+    volumes:
+      - /opt/tk-platform/staging-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vd_nexus -d vd_nexus_staging"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  tk-platform-staging:
+    depends_on:
+      postgres-staging:
+        condition: service_healthy
+    environment:
+      TK_DATABASE_URL: postgresql+psycopg://vd_nexus:${TK_POSTGRES_PASSWORD}@postgres-staging:5432/vd_nexus_staging

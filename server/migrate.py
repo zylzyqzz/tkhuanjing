@@ -14,7 +14,7 @@ from .security import seed_admin
 from .services import seed_defaults
 
 
-MIGRATION_VERSION = 6
+MIGRATION_VERSION = 7
 
 
 REQUIRED_COLUMNS = {
@@ -40,11 +40,32 @@ REQUIRED_COLUMNS = {
         "minimum_version text default ''", "signature text default ''",
     ],
     "live_rooms": ["status text default 'active'"],
+    "customers": [
+        "tenant_code text default ''", "short_name text default ''", "logo_url text default ''",
+        "timezone text default 'Asia/Shanghai'", "plan_code text default 'trial'",
+        "device_limit integer default 3", "member_limit integer default 3",
+        "subscription_starts_at text default null", "subscription_expires_at text default null",
+        "grace_ends_at text default null", "wecom_webhook_encrypted text default ''",
+        "alert_settings_json text default '{}'",
+    ],
+    "admins": [
+        "customer_id integer default null", "role text default 'platform_super'",
+        "display_name text default ''", "phone text default ''", "last_login_at text default null",
+        "last_login_ip text default ''", "password_changed_at text default null",
+        "two_factor_enabled integer default 0",
+    ],
     "devices": [
         "status text default 'active'", "notes text default ''",
         "free_trial_started_at text default null", "free_trial_expires_at text default null",
         "target_region_id text default 'us-los-angeles'",
         "user_id integer default null",
+        "streaming_account_id integer default null", "display_name text default ''",
+        "store_name text default ''", "location text default ''", "owner_name text default ''",
+        "tags_json text default '[]'", "live_state text default 'idle'",
+        "readiness_state text default 'unknown'", "studio_state text default 'unknown'",
+        "last_heartbeat_at text default null", "last_report_id text default null",
+        "last_report_at text default null", "module_summary_json text default '{}'",
+        "state_version integer default 0",
     ],
     "check_reports": [
         "schema_version integer default 3", "target_region_id text default 'us-los-angeles'",
@@ -121,7 +142,10 @@ def run(legacy: Path | None = None) -> Path | None:
                 except Exception:
                     shutil.copy2(snapshot, target)
                     raise
-    Base.metadata.create_all(engine)
+    # Phase 0+ enterprise tables are owned by Alembic revisions. Keep this
+    # compatibility helper limited to the V1 schema for old SQLite installs.
+    enterprise_tables = {"organization_members", "organization_member_sessions", "live_accounts", "anchor_profiles", "device_room_bindings", "device_heartbeats_v2"}
+    Base.metadata.create_all(engine, tables=[table for table in Base.metadata.sorted_tables if table.name not in enterprise_tables])
     with SessionLocal() as db:
         seed_admin(db)
         seed_defaults(db)

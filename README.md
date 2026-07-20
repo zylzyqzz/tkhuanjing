@@ -22,12 +22,12 @@ VD Nexus 是面向 TikTok 电脑直播的开播前环境检测工具。当前版
 py -3.12 -m venv .venv
 .\.venv\Scripts\python -m pip install -e ".[test,build]"
 Copy-Item .env.example .env
-.\.venv\Scripts\python -m server.migrate
+.\.venv\Scripts\python -m alembic upgrade head
 .\.venv\Scripts\python -m uvicorn server.main:app --reload
 .\.venv\Scripts\python -m client_v2.main
 ```
 
-管理后台：`http://127.0.0.1:8000/tk-admin/`；健康检查：`http://127.0.0.1:8000/health`。
+管理后台：`http://127.0.0.1:8000/tk-admin/`；健康检查：`http://127.0.0.1:8000/api/v1/health`。V1 客户端接口保持兼容，企业成员、设备绑定和实时心跳使用 `/api/v2`。
 
 ## 测试与发布
 

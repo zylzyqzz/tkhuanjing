@@ -1,3 +1,4 @@
+import hashlib
 import json
 import secrets
 import string
@@ -8,14 +9,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import CheckItem, CheckProfile, CheckReport, Code, Device, LicenseEvent, Release, User, UserSession, VerificationCode, now_iso
-from ..schemas import ActivateRequest, AuthorizeRequest, ForgotPasswordRequest, RegisterRequest, ReportIn, ResetPasswordRequest, SendCodeRequest, UserLoginRequest, UserProfileUpdate, UserRegisterRequest
+from ..models import Alert, CheckItem, CheckProfile, CheckReport, Code, Customer, Device, DeviceBindingCode, DeviceEvent, LicenseEvent, Release, User, UserSession, VerificationCode, now_iso
+from ..schemas import ActivateRequest, AuthorizeRequest, BindDeviceIn, DeviceEventsIn, ForgotPasswordRequest, HeartbeatIn, RegisterRequest, ReportIn, ResetPasswordRequest, SendCodeRequest, UserLoginRequest, UserProfileUpdate, UserRegisterRequest
 from ..security import current_device, current_user, enforce_rate_limit, hash_token, hasher, request_ip, user_from_token, verify_password
 from ..services import DEFAULT_PROFILE, release_manifest
 from ..config import get_settings
 from ..email_utils import send_verification_code
 from ..ai_service import explain
 from ..report_policy import authoritative_report
+from ..notifications import enqueue_alert
 from client_v2.regions import REGIONS
 
 
@@ -27,6 +29,23 @@ def license_view(device: Device, db: Session) -> dict:
     if not code:
         return {"tier": "FREE", "credits": device.free_uses_remaining, "status": "active", "expires_at": device.free_trial_expires_at}
     return {"code": code.code, "tier": code.tier, "plan_code": code.plan_code, "credits": code.credits, "status": code.status, "expires_at": code.expires_at}
+
+
+ALERT_EVENTS = {
+    "check_failed": ("检测失败", "critical", "client"),
+    "studio_crashed": ("TikTok LIVE Studio 异常退出", "critical", "live_studio"),
+}
+
+
+def upsert_alert(db: Session, device: Device, alert_type: str, title: str, severity: str, root_cause: str, details: dict | None = None) -> None:
+    if not device.customer_id:
+        return
+    row = db.scalar(select(Alert).where(Alert.customer_id == device.customer_id, Alert.device_id == device.device_id, Alert.alert_type == alert_type, Alert.status.in_(["open", "acknowledged", "processing"])).order_by(Alert.last_seen_at.desc()))
+    if row:
+        row.occurrence_count += 1; row.last_seen_at = now_iso(); row.details_json = json.dumps(details or {}, ensure_ascii=False)
+    else:
+        row = Alert(customer_id=device.customer_id, device_id=device.device_id, alert_type=alert_type, title=title, severity=severity, root_cause=root_cause, details_json=json.dumps(details or {}, ensure_ascii=False))
+        db.add(row); db.flush(); enqueue_alert(db, row)
 
 
 @router.post("/register")
@@ -46,6 +65,53 @@ def register(payload: RegisterRequest, request: Request, db: Session = Depends(g
     device.last_seen = now_iso()
     db.commit()
     return {"device_token": token, "device_id": device.device_id, "license": license_view(device, db)}
+
+
+@router.post("/bind-enterprise")
+def bind_enterprise(payload: BindDeviceIn, device: Device = Depends(current_device), db: Session = Depends(get_db)) -> dict:
+    digest = hashlib.sha256(payload.code.encode()).hexdigest()
+    binding = db.get(DeviceBindingCode, digest)
+    if not binding or binding.used_at or datetime.fromisoformat(binding.expires_at) <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="绑定码无效或已过期")
+    tenant = db.get(Customer, binding.customer_id)
+    active_count = len(db.scalars(select(Device).where(Device.customer_id == tenant.id, Device.status == "active")).all())
+    if device.customer_id != tenant.id and active_count >= tenant.device_limit:
+        raise HTTPException(status_code=409, detail="企业设备额度已用完")
+    device.customer_id = tenant.id; device.customer_name = tenant.name; device.room_id = binding.room_id; device.streaming_account_id = binding.streaming_account_id
+    binding.used_at = now_iso(); binding.used_device_id = device.device_id
+    db.add(DeviceEvent(event_id=secrets.token_hex(16), customer_id=tenant.id, device_id=device.device_id, event_type="online", severity="info", payload_json=json.dumps({"source": "enterprise_binding"})))
+    db.commit(); return {"ok": True, "tenant": {"id": tenant.id, "name": tenant.name}, "device_limit": tenant.device_limit}
+
+
+@router.post("/heartbeat")
+def heartbeat(payload: HeartbeatIn, request: Request, device: Device = Depends(current_device), db: Session = Depends(get_db)) -> dict:
+    enforce_rate_limit("heartbeat", f"{request_ip(request)}:{device.device_id}", 180, 3600)
+    was_offline = not device.last_heartbeat_at or (datetime.now(timezone.utc) - datetime.fromisoformat(device.last_heartbeat_at)).total_seconds() > 90
+    device.last_seen = now_iso(); device.last_heartbeat_at = now_iso(); device.app_version = payload.app_version or device.app_version
+    device.live_state = payload.live_state; device.readiness_state = payload.readiness_state; device.studio_state = payload.studio_state
+    device.target_region_id = payload.target_region_id or device.target_region_id; device.last_report_id = payload.last_report_id; device.last_report_at = payload.last_report_at
+    device.module_summary_json = json.dumps(payload.module_summary, ensure_ascii=False); device.state_version += 1
+    if was_offline and device.customer_id:
+        db.add(DeviceEvent(event_id=secrets.token_hex(16), customer_id=device.customer_id, device_id=device.device_id, event_type="online", severity="info", client_at=payload.client_at, payload_json="{}"))
+    if payload.readiness_state == "blocked": upsert_alert(db, device, "system_blocked", "系统环境阻止开播", "critical", "system", payload.module_summary.get("system"))
+    elif payload.readiness_state == "ready":
+        for row in db.scalars(select(Alert).where(Alert.device_id == device.device_id, Alert.alert_type.in_(["system_blocked", "check_failed"]), Alert.status.in_(["open", "acknowledged", "processing"]))).all():
+            row.status = "resolved"; row.resolved_at = now_iso(); enqueue_alert(db, row, "resolved")
+    if payload.studio_state == "crashed": upsert_alert(db, device, "studio_crashed", "TikTok LIVE Studio 异常退出", "critical", "live_studio")
+    db.commit(); return {"ok": True, "server_at": now_iso(), "state_version": device.state_version, "next_heartbeat_seconds": 30}
+
+
+@router.post("/events")
+def device_events(payload: DeviceEventsIn, request: Request, device: Device = Depends(current_device), db: Session = Depends(get_db)) -> dict:
+    enforce_rate_limit("device-events", f"{request_ip(request)}:{device.device_id}", 300, 3600); accepted = []
+    for event in payload.events:
+        if db.scalar(select(DeviceEvent).where(DeviceEvent.event_id == event.event_id)):
+            accepted.append(event.event_id); continue
+        db.add(DeviceEvent(event_id=event.event_id, customer_id=device.customer_id, device_id=device.device_id, event_type=event.event_type, severity=event.severity, client_at=event.client_at, payload_json=json.dumps(event.payload, ensure_ascii=False)))
+        rule = ALERT_EVENTS.get(event.event_type)
+        if rule: upsert_alert(db, device, event.event_type, rule[0], rule[1], rule[2], event.payload)
+        accepted.append(event.event_id)
+    device.last_seen = now_iso(); db.commit(); return {"ok": True, "accepted": accepted}
 
 
 @router.get("/profile")
@@ -180,6 +246,8 @@ def upload_report(payload: ReportIn, request: Request, device: Device = Depends(
     report.items = item_rows
     db.add(report)
     device.last_seen = now_iso()
+    device.last_report_id = payload.report_id; device.last_report_at = payload.checked_at
+    device.readiness_state = "blocked" if decision["readiness_level"] == "NOT_READY" else "ready" if decision["readiness_level"] in {"READY", "READY_WITH_RISK"} else "incomplete"
     db.commit()
     return {"ok": True, "idempotent": False, "report_id": payload.report_id}
 

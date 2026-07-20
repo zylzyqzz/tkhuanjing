@@ -69,20 +69,49 @@ def enforce_rate_limit(scope: str, key: str, limit: int, window_seconds: int) ->
     bucket.append(now)
 
 
-def make_session(username: str) -> tuple[str, str]:
+ROLE_PERMISSIONS = {
+    "platform_super": ["*"],
+    "tenant_owner": ["dashboard.read", "devices.read", "devices.manage", "reports.read", "alerts.manage", "workorders.manage", "members.manage", "accounts.manage", "subscription.read"],
+    "tenant_operator": ["dashboard.read", "devices.read", "reports.read", "alerts.manage", "workorders.manage", "accounts.read", "subscription.read"],
+    "tenant_viewer": ["dashboard.read", "devices.read", "reports.read", "alerts.read", "workorders.read", "accounts.read", "subscription.read"],
+}
+
+
+def make_session(admin: Admin | str) -> tuple[str, str]:
     csrf = secrets.token_urlsafe(24)
     expires = datetime.now(timezone.utc) + timedelta(hours=settings.session_hours)
-    token = serializer.dumps({"username": username, "csrf": csrf, "expires": expires.isoformat()})
+    if isinstance(admin, str):
+        payload = {"username": admin, "admin_id": 0, "role": "platform_super", "customer_id": None}
+    else:
+        payload = {"username": admin.username, "admin_id": admin.id, "role": admin.role, "customer_id": admin.customer_id}
+    token = serializer.dumps({**payload, "csrf": csrf, "expires": expires.isoformat()})
     return token, csrf
 
 
-def current_admin(tk_session: str | None = Cookie(default=None)) -> dict:
+def permissions_for(role: str) -> list[str]:
+    return ROLE_PERMISSIONS.get(role, [])
+
+
+def require_permission(permission: str):
+    def dependency(admin: dict = Depends(current_admin)) -> dict:
+        allowed = permissions_for(admin.get("role", ""))
+        if "*" not in allowed and permission not in allowed:
+            raise HTTPException(status_code=403, detail="当前账号没有此操作权限")
+        return admin
+    return dependency
+
+
+def current_admin(request: Request, tk_session: str | None = Cookie(default=None)) -> dict:
     if not tk_session:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请先登录")
     try:
         payload = serializer.loads(tk_session, max_age=settings.session_hours * 3600)
         if datetime.fromisoformat(payload["expires"]) < datetime.now(timezone.utc):
             raise BadSignature("expired")
+        role = payload.get("role", "platform_super")
+        path = request.url.path
+        if role != "platform_super" and not (path.startswith("/tk-api/enterprise") or path in {"/tk-api/session", "/tk-api/logout"}):
+            raise HTTPException(status_code=403, detail="企业账号不能访问平台管理接口")
         return payload
     except (BadSignature, KeyError, ValueError):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录已过期") from None
@@ -94,6 +123,18 @@ def require_csrf(
 ) -> dict:
     if not csrf or not secrets.compare_digest(csrf, admin["csrf"]):
         raise HTTPException(status_code=403, detail="安全校验失败，请刷新页面")
+    return admin
+
+
+def current_platform_admin(admin: dict = Depends(current_admin)) -> dict:
+    if admin.get("role", "platform_super") != "platform_super":
+        raise HTTPException(status_code=403, detail="此功能仅限平台管理员")
+    return admin
+
+
+def require_platform_csrf(admin: dict = Depends(require_csrf)) -> dict:
+    if admin.get("role", "platform_super") != "platform_super":
+        raise HTTPException(status_code=403, detail="此功能仅限平台管理员")
     return admin
 
 

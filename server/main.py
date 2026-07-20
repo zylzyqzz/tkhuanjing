@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import uuid
 from datetime import datetime
@@ -15,10 +17,11 @@ from sqlalchemy.orm import Session
 
 from .config import get_settings
 from .database import SessionLocal, get_db
-from .models import DownloadStat, Release, Setting, now_iso
+from .models import Alert, Device, DeviceEvent, DownloadStat, Release, Setting, now_iso
 from .public_page import render_home, unavailable_page
 from .migrate import run as migrate
-from .routers import admin, client
+from .notifications import deliver_pending, enqueue_alert
+from .routers import admin, client, enterprise, v2
 from client_v2.product import APP_NAME, APP_VERSION, REPORT_SCHEMA_VERSION
 
 
@@ -34,6 +37,28 @@ app = FastAPI(title=f"{APP_NAME}管理平台", version=APP_VERSION, docs_url="/a
 app.include_router(client.router, prefix="/api/v1/client")
 app.include_router(client.router, prefix="/api/client", include_in_schema=False)
 app.include_router(admin.router)
+app.include_router(enterprise.router)
+app.include_router(v2.router)
+offline_monitor_task = None
+
+
+async def monitor_offline_devices() -> None:
+    while True:
+        await asyncio.sleep(30)
+        cutoff = datetime.now().astimezone().timestamp() - 90
+        with SessionLocal() as db:
+            rows = db.scalars(select(Device).where(Device.customer_id.is_not(None), Device.status == "active", Device.last_heartbeat_at.is_not(None))).all()
+            for device in rows:
+                try: offline = datetime.fromisoformat(device.last_heartbeat_at).timestamp() < cutoff
+                except (TypeError, ValueError): offline = True
+                open_alert = db.scalar(select(Alert).where(Alert.device_id == device.device_id, Alert.alert_type == "device_offline", Alert.status.in_(["open", "acknowledged", "processing"])))
+                if offline and not open_alert:
+                    alert = Alert(customer_id=device.customer_id, device_id=device.device_id, alert_type="device_offline", severity="critical", title="设备持续离线", root_cause="client_connection", details_json=json.dumps({"last_heartbeat_at": device.last_heartbeat_at}, ensure_ascii=False))
+                    db.add(alert); db.flush(); enqueue_alert(db, alert); db.add(DeviceEvent(event_id=str(uuid.uuid4()), customer_id=device.customer_id, device_id=device.device_id, event_type="offline", severity="critical", payload_json=alert.details_json))
+                elif not offline and open_alert:
+                    open_alert.status = "resolved"; open_alert.resolved_at = now_iso(); enqueue_alert(db, open_alert, "resolved")
+            deliver_pending(db)
+            db.commit()
 
 
 @app.get("/api/v1/health", tags=["system"])
@@ -55,10 +80,29 @@ def health() -> dict:
     }
 
 
+@app.get("/tk-admin/font/NotoSansSC-VF.ttf", include_in_schema=False)
+@app.get("/assets/NotoSansSC-VF.ttf", include_in_schema=False)
+def admin_font() -> FileResponse:
+    return FileResponse(Path(__file__).resolve().parents[1] / "assets" / "NotoSansSC-VF.ttf", media_type="font/ttf")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> FileResponse:
+    return FileResponse(Path(__file__).resolve().parents[1] / "assets" / "app_icon.ico", media_type="image/x-icon")
+
+
 @app.on_event("startup")
 def startup() -> None:
+    global offline_monitor_task
     migrate()
+    offline_monitor_task = asyncio.create_task(monitor_offline_devices())
     logger.info("server_started env=%s", settings.env)
+
+
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    if offline_monitor_task:
+        offline_monitor_task.cancel()
 
 
 @app.middleware("http")

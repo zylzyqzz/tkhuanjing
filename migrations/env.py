@@ -3,6 +3,7 @@ from sqlalchemy import engine_from_config, pool
 from server.config import get_settings
 from server.database import Base
 from server import models  # noqa: F401
+from server import models_enterprise  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", get_settings().database_url)
@@ -19,4 +20,3 @@ def run_migrations_online():
         with context.begin_transaction(): context.run_migrations()
 
 run_migrations_offline() if context.is_offline_mode() else run_migrations_online()
-

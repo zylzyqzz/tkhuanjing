@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .config import get_settings
-from .models import AuditLog, CheckProfile, Code, Release, Setting, now_iso
+from .models import AuditLog, CheckProfile, Code, Release, Setting, SubscriptionPlan, now_iso
 
 
 TIERS = {"TK1": 1, "TKX": 10, "TKV": -1}
@@ -60,6 +60,15 @@ def seed_defaults(db: Session) -> None:
         feature_setting.value = DEFAULT_SETTINGS["product_features"]
     if not db.scalar(select(CheckProfile).where(CheckProfile.active.is_(True))):
         db.add(CheckProfile(name=DEFAULT_PROFILE["profile_name"], region="*", bitrate_kbps=6000, rules_json=json.dumps(DEFAULT_PROFILE, ensure_ascii=False), active=True, created_at=now_iso(), updated_at=now_iso()))
+    plans = [
+        ("trial", "试用版", 3, 3, 30, False, False),
+        ("basic", "基础版", 10, 5, 90, True, False),
+        ("pro", "专业版", 50, 20, 365, True, True),
+        ("custom", "定制版", 1000, 200, 730, True, True),
+    ]
+    for code, name, devices, members, retention, wecom, stats in plans:
+        if not db.get(SubscriptionPlan, code):
+            db.add(SubscriptionPlan(code=code, name=name, device_limit=devices, member_limit=members, report_retention_days=retention, wecom_alerts=wecom, advanced_stats=stats))
     db.commit()
 
 

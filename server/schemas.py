@@ -126,6 +126,14 @@ class CustomerIn(BaseModel):
     contact: str = Field(default="", max_length=160)
     notes: str = Field(default="", max_length=2000)
     status: Literal["active", "inactive"] = "active"
+    tenant_code: str = Field(default="", max_length=40)
+    short_name: str = Field(default="", max_length=80)
+    timezone: str = Field(default="Asia/Shanghai", max_length=80)
+    plan_code: str = Field(default="trial", max_length=40)
+    device_limit: int = Field(default=3, ge=1, le=100000)
+    member_limit: int = Field(default=3, ge=1, le=10000)
+    subscription_starts_at: str | None = Field(default=None, max_length=40)
+    subscription_expires_at: str | None = Field(default=None, max_length=40)
 
 
 class RoomIn(BaseModel):
@@ -161,6 +169,114 @@ class DeviceIn(BaseModel):
     status: Literal["active", "inactive"] = "active"
     notes: str = Field(default="", max_length=2000)
     unbind_license: bool = False
+    streaming_account_id: int | None = None
+    display_name: str = Field(default="", max_length=120)
+    store_name: str = Field(default="", max_length=120)
+    location: str = Field(default="", max_length=160)
+    owner_name: str = Field(default="", max_length=80)
+    tags: list[str] = Field(default_factory=list, max_length=30)
+
+
+class AdminMemberIn(BaseModel):
+    id: int | None = None
+    username: str = Field(min_length=3, max_length=80)
+    password: str = Field(default="", max_length=256)
+    display_name: str = Field(default="", max_length=80)
+    phone: str = Field(default="", max_length=30)
+    role: Literal["tenant_owner", "tenant_operator", "tenant_viewer"] = "tenant_viewer"
+    active: bool = True
+
+
+class TenantProvisionIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    short_name: str = Field(default="", max_length=80)
+    contact: str = Field(default="", max_length=160)
+    timezone: str = Field(default="Asia/Shanghai", max_length=80)
+    plan_code: Literal["trial", "basic", "pro", "custom"] = "trial"
+    device_limit: int = Field(default=3, ge=1, le=100000)
+    member_limit: int = Field(default=3, ge=1, le=10000)
+    subscription_days: int = Field(default=30, ge=1, le=3650)
+    owner_username: str = Field(min_length=3, max_length=80)
+    owner_password: str = Field(min_length=8, max_length=256)
+    owner_name: str = Field(default="", max_length=80)
+
+
+class StreamingAccountIn(BaseModel):
+    id: int | None = None
+    room_id: int | None = None
+    name: str = Field(min_length=1, max_length=120)
+    platform: str = Field(default="TikTok", max_length=40)
+    owner_name: str = Field(default="", max_length=80)
+    target_region_id: str = Field(default="us-los-angeles", max_length=80)
+    notes: str = Field(default="", max_length=2000)
+    status: Literal["active", "inactive"] = "active"
+
+
+class BindingCodeIn(BaseModel):
+    room_id: int | None = None
+    streaming_account_id: int | None = None
+
+
+class BindDeviceIn(BaseModel):
+    code: str = Field(min_length=6, max_length=20)
+
+
+class HeartbeatIn(BaseModel):
+    client_at: str = Field(default="", max_length=50)
+    app_version: str = Field(default="", max_length=40)
+    live_state: Literal["idle", "checking", "repairing", "rechecking", "ready", "risk", "failed"] = "idle"
+    readiness_state: Literal["ready", "warning", "blocked", "incomplete", "unknown"] = "unknown"
+    studio_state: Literal["not_running", "running", "crashed", "unknown"] = "unknown"
+    target_region_id: str = Field(default="", max_length=80)
+    last_report_id: str | None = Field(default=None, max_length=80)
+    last_report_at: str | None = Field(default=None, max_length=50)
+    module_summary: dict[str, Any] = Field(default_factory=dict)
+
+
+class DeviceEventIn(BaseModel):
+    event_id: str = Field(min_length=8, max_length=80)
+    event_type: Literal["online", "offline", "check_started", "check_failed", "repair_started", "repair_finished", "recheck_finished", "studio_started", "studio_stopped", "studio_crashed"]
+    severity: Literal["info", "warning", "critical"] = "info"
+    client_at: str = Field(default="", max_length=50)
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class DeviceEventsIn(BaseModel):
+    events: list[DeviceEventIn] = Field(min_length=1, max_length=100)
+
+
+class AlertUpdateIn(BaseModel):
+    status: Literal["open", "acknowledged", "processing", "resolved", "closed"]
+
+
+class WorkOrderIn(BaseModel):
+    id: int | None = None
+    alert_id: int | None = None
+    device_id: str | None = Field(default=None, max_length=80)
+    title: str = Field(min_length=1, max_length=160)
+    priority: Literal["low", "medium", "high", "critical"] = "medium"
+    status: Literal["open", "processing", "resolved", "closed"] = "open"
+    owner: str = Field(default="", max_length=80)
+    notes: str = Field(default="", max_length=5000)
+    resolution: str = Field(default="", max_length=5000)
+
+
+class TenantDeviceUpdateIn(BaseModel):
+    display_name: str = Field(default="", max_length=120)
+    room_id: int | None = None
+    streaming_account_id: int | None = None
+    store_name: str = Field(default="", max_length=120)
+    location: str = Field(default="", max_length=160)
+    owner_name: str = Field(default="", max_length=80)
+    tags: list[str] = Field(default_factory=list, max_length=30)
+
+
+class TenantAlertSettingsIn(BaseModel):
+    wecom_webhook: str = Field(default="", max_length=1000)
+    enabled_types: list[str] = Field(default_factory=lambda: ["system_blocked", "device_offline", "studio_crashed"], max_length=20)
+    minimum_severity: Literal["warning", "critical"] = "critical"
+    quiet_start: str = Field(default="", max_length=5)
+    quiet_end: str = Field(default="", max_length=5)
 
 
 class SupportIn(BaseModel):

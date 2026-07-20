@@ -69,6 +69,18 @@ class Customer(Base):
     contact: Mapped[str] = mapped_column(String(160), default="")
     notes: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(20), default="active", index=True)
+    tenant_code: Mapped[str] = mapped_column(String(40), default="", index=True)
+    short_name: Mapped[str] = mapped_column(String(80), default="")
+    logo_url: Mapped[str] = mapped_column(String(500), default="")
+    timezone: Mapped[str] = mapped_column(String(80), default="Asia/Shanghai")
+    plan_code: Mapped[str] = mapped_column(String(40), default="trial")
+    device_limit: Mapped[int] = mapped_column(Integer, default=3)
+    member_limit: Mapped[int] = mapped_column(Integer, default=3)
+    subscription_starts_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    subscription_expires_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    grace_ends_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    wecom_webhook_encrypted: Mapped[str] = mapped_column(Text, default="")
+    alert_settings_json: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[str] = mapped_column(String(40), default=now_iso)
     rooms: Mapped[list[LiveRoom]] = relationship(back_populates="customer")
 
@@ -105,6 +117,47 @@ class Device(Base):
     status: Mapped[str] = mapped_column(String(20), default="active")
     notes: Mapped[str] = mapped_column(Text, default="")
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    streaming_account_id: Mapped[int | None] = mapped_column(ForeignKey("streaming_accounts.id", ondelete="SET NULL"), nullable=True)
+    display_name: Mapped[str] = mapped_column(String(120), default="")
+    store_name: Mapped[str] = mapped_column(String(120), default="")
+    location: Mapped[str] = mapped_column(String(160), default="")
+    owner_name: Mapped[str] = mapped_column(String(80), default="")
+    tags_json: Mapped[str] = mapped_column(Text, default="[]")
+    live_state: Mapped[str] = mapped_column(String(30), default="idle", index=True)
+    readiness_state: Mapped[str] = mapped_column(String(30), default="unknown", index=True)
+    studio_state: Mapped[str] = mapped_column(String(30), default="unknown", index=True)
+    last_heartbeat_at: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    last_report_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    last_report_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    module_summary_json: Mapped[str] = mapped_column(Text, default="{}")
+    state_version: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class StreamingAccount(Base):
+    __tablename__ = "streaming_accounts"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id", ondelete="CASCADE"), index=True)
+    room_id: Mapped[int | None] = mapped_column(ForeignKey("live_rooms.id", ondelete="SET NULL"), nullable=True)
+    name: Mapped[str] = mapped_column(String(120), index=True)
+    platform: Mapped[str] = mapped_column(String(40), default="TikTok")
+    owner_name: Mapped[str] = mapped_column(String(80), default="")
+    target_region_id: Mapped[str] = mapped_column(String(80), default="us-los-angeles")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(20), default="active", index=True)
+    created_at: Mapped[str] = mapped_column(String(40), default=now_iso)
+
+
+class DeviceBindingCode(Base):
+    __tablename__ = "device_binding_codes"
+    code_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id", ondelete="CASCADE"), index=True)
+    room_id: Mapped[int | None] = mapped_column(ForeignKey("live_rooms.id", ondelete="SET NULL"), nullable=True)
+    streaming_account_id: Mapped[int | None] = mapped_column(ForeignKey("streaming_accounts.id", ondelete="SET NULL"), nullable=True)
+    created_by: Mapped[int] = mapped_column(ForeignKey("admins.id", ondelete="CASCADE"))
+    expires_at: Mapped[str] = mapped_column(String(40), index=True)
+    used_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    used_device_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_at: Mapped[str] = mapped_column(String(40), default=now_iso)
 
 
 class CheckReport(Base):
@@ -207,6 +260,97 @@ class SupportCase(Base):
     updated_at: Mapped[str] = mapped_column(String(40), default=now_iso)
 
 
+class DeviceEvent(Base):
+    __tablename__ = "device_events"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    event_id: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id", ondelete="CASCADE"), nullable=True, index=True)
+    device_id: Mapped[str] = mapped_column(ForeignKey("devices.device_id", ondelete="CASCADE"), index=True)
+    event_type: Mapped[str] = mapped_column(String(50), index=True)
+    severity: Mapped[str] = mapped_column(String(20), default="info", index=True)
+    client_at: Mapped[str] = mapped_column(String(40), default="")
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[str] = mapped_column(String(40), default=now_iso, index=True)
+
+
+class Alert(Base):
+    __tablename__ = "alerts"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id", ondelete="CASCADE"), index=True)
+    device_id: Mapped[str] = mapped_column(ForeignKey("devices.device_id", ondelete="CASCADE"), index=True)
+    alert_type: Mapped[str] = mapped_column(String(50), index=True)
+    severity: Mapped[str] = mapped_column(String(20), default="warning", index=True)
+    status: Mapped[str] = mapped_column(String(20), default="open", index=True)
+    title: Mapped[str] = mapped_column(String(160))
+    root_cause: Mapped[str] = mapped_column(String(80), default="")
+    details_json: Mapped[str] = mapped_column(Text, default="{}")
+    occurrence_count: Mapped[int] = mapped_column(Integer, default=1)
+    first_seen_at: Mapped[str] = mapped_column(String(40), default=now_iso)
+    last_seen_at: Mapped[str] = mapped_column(String(40), default=now_iso, index=True)
+    acknowledged_by: Mapped[str] = mapped_column(String(80), default="")
+    resolved_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+
+class WorkOrder(Base):
+    __tablename__ = "work_orders"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id", ondelete="CASCADE"), index=True)
+    alert_id: Mapped[int | None] = mapped_column(ForeignKey("alerts.id", ondelete="SET NULL"), nullable=True)
+    device_id: Mapped[str | None] = mapped_column(ForeignKey("devices.device_id", ondelete="SET NULL"), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(160))
+    priority: Mapped[str] = mapped_column(String(20), default="medium")
+    status: Mapped[str] = mapped_column(String(20), default="open", index=True)
+    owner: Mapped[str] = mapped_column(String(80), default="")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    resolution: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[str] = mapped_column(String(40), default=now_iso)
+    updated_at: Mapped[str] = mapped_column(String(40), default=now_iso)
+    resolved_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+
+class NotificationDelivery(Base):
+    __tablename__ = "notification_deliveries"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id", ondelete="CASCADE"), index=True)
+    alert_id: Mapped[int | None] = mapped_column(ForeignKey("alerts.id", ondelete="SET NULL"), nullable=True, index=True)
+    channel: Mapped[str] = mapped_column(String(30), default="wecom")
+    event_type: Mapped[str] = mapped_column(String(30), default="opened")
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[str] = mapped_column(String(40), default=now_iso, index=True)
+    last_error: Mapped[str] = mapped_column(Text, default="")
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[str] = mapped_column(String(40), default=now_iso)
+    sent_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+
+class SubscriptionPlan(Base):
+    __tablename__ = "subscription_plans"
+    code: Mapped[str] = mapped_column(String(40), primary_key=True)
+    name: Mapped[str] = mapped_column(String(80))
+    device_limit: Mapped[int] = mapped_column(Integer)
+    member_limit: Mapped[int] = mapped_column(Integer)
+    report_retention_days: Mapped[int] = mapped_column(Integer, default=90)
+    wecom_alerts: Mapped[bool] = mapped_column(Boolean, default=False)
+    advanced_stats: Mapped[bool] = mapped_column(Boolean, default=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id", ondelete="CASCADE"), index=True)
+    plan_code: Mapped[str] = mapped_column(ForeignKey("subscription_plans.code"))
+    order_no: Mapped[str] = mapped_column(String(80), default="", index=True)
+    amount_cents: Mapped[int] = mapped_column(Integer, default=0)
+    device_limit: Mapped[int] = mapped_column(Integer)
+    starts_at: Mapped[str] = mapped_column(String(40))
+    expires_at: Mapped[str] = mapped_column(String(40))
+    grace_ends_at: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(20), default="active", index=True)
+    created_at: Mapped[str] = mapped_column(String(40), default=now_iso)
+
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -234,6 +378,14 @@ class Admin(Base):
     username: Mapped[str] = mapped_column(String(80), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(Text)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, index=True)
+    role: Mapped[str] = mapped_column(String(30), default="platform_super", index=True)
+    display_name: Mapped[str] = mapped_column(String(80), default="")
+    phone: Mapped[str] = mapped_column(String(30), default="")
+    last_login_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    last_login_ip: Mapped[str] = mapped_column(String(80), default="")
+    password_changed_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    two_factor_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[str] = mapped_column(String(40), default=now_iso)
 
 

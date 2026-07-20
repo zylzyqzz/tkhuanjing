@@ -213,3 +213,73 @@ def test_admin_password_reset_utility(tmp_path):
         manage.reset_admin_password("admin", "New-Admin-Password-123")
         response = client.post("/tk-api/login", json={"username": "admin", "password": "New-Admin-Password-123"})
         assert response.status_code == 200
+
+
+def test_enterprise_tenant_heartbeat_alerts_and_isolation(tmp_path, monkeypatch):
+    with build_client(tmp_path) as client:
+        csrf = admin_login(client)
+        provisioned = client.post("/tk-api/enterprise/platform/tenants", headers={"X-CSRF-Token": csrf}, json={
+            "name": "星河直播", "short_name": "星河", "contact": "运营负责人",
+            "plan_code": "basic", "device_limit": 10, "member_limit": 5,
+            "subscription_days": 365, "owner_username": "xinghe-owner",
+            "owner_password": "Strong-Owner-123", "owner_name": "企业主管",
+        })
+        assert provisioned.status_code == 200, provisioned.text
+        client.post("/tk-api/logout", headers={"X-CSRF-Token": csrf})
+        login = client.post("/tk-api/login", json={"username": "xinghe-owner", "password": "Strong-Owner-123"})
+        assert login.status_code == 200 and login.json()["role"] == "tenant_owner"
+        tenant_csrf = login.json()["csrf"]
+        assert client.get("/tk-api/devices").status_code == 403
+        room = client.post("/tk-api/enterprise/rooms", headers={"X-CSRF-Token": tenant_csrf}, json={"name": "美区一号直播间", "region": "US", "bitrate_kbps": 6000, "status": "active"})
+        assert room.status_code == 200
+        account = client.post("/tk-api/enterprise/accounts", headers={"X-CSRF-Token": tenant_csrf}, json={"name": "美区主账号", "platform": "TikTok", "room_id": room.json()["id"], "target_region_id": "us-los-angeles"})
+        assert account.status_code == 200
+        assert client.get("/tk-api/enterprise/accounts").json()["accounts"][0]["name"] == "美区主账号"
+        alert_config = client.post("/tk-api/enterprise/alert-settings", headers={"X-CSRF-Token": tenant_csrf}, json={"wecom_webhook": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test-secret-key", "minimum_severity": "critical"})
+        assert alert_config.status_code == 200 and alert_config.json()["wecom_configured"] is True
+        loaded_config = client.get("/tk-api/enterprise/alert-settings").json()
+        assert loaded_config["wecom_configured"] is True and "wecom_webhook" not in loaded_config["settings"]
+        code_response = client.post("/tk-api/enterprise/binding-codes", headers={"X-CSRF-Token": tenant_csrf}, json={})
+        assert code_response.status_code == 200
+        _, device_headers = register(client, "DEVICE-ENTERPRISE-0001")
+        bound = client.post("/api/v1/client/bind-enterprise", headers=device_headers, json={"code": code_response.json()["code"]})
+        assert bound.status_code == 200 and bound.json()["tenant"]["name"] == "星河直播"
+        heartbeat = client.post("/api/v1/client/heartbeat", headers=device_headers, json={
+            "client_at": "2026-07-20T00:00:00+00:00", "app_version": "2.1.0",
+            "live_state": "risk", "readiness_state": "blocked", "studio_state": "running",
+            "target_region_id": "us-los-angeles", "module_summary": {"system": {"status": "FAIL", "issues": 1}},
+        })
+        assert heartbeat.status_code == 200 and heartbeat.json()["state_version"] == 1
+        overview = client.get("/tk-api/enterprise/overview").json()
+        assert overview["metrics"]["online"] == 1 and overview["metrics"]["blocked"] == 1
+        alerts = client.get("/tk-api/enterprise/alerts").json()["alerts"]
+        assert alerts[0]["alert_type"] == "system_blocked"
+        notifications = importlib.import_module("server.notifications")
+        database = importlib.import_module("server.database")
+        models = importlib.import_module("server.models")
+        class WeComResponse:
+            def raise_for_status(self): return None
+            def json(self): return {"errcode": 0, "errmsg": "ok"}
+        monkeypatch.setattr(notifications.httpx, "post", lambda *args, **kwargs: WeComResponse())
+        with database.SessionLocal() as db:
+            assert db.query(models.NotificationDelivery).filter_by(status="pending").count() == 1
+            assert notifications.deliver_pending(db) == 1
+            assert db.query(models.NotificationDelivery).filter_by(status="sent").count() == 1
+        work_payload = {"alert_id": alerts[0]["id"], "device_id": "DEVICE-ENTERPRISE-0001", "title": "处理系统阻断", "priority": "critical", "status": "open", "owner": "运维A", "notes": "开始排查", "resolution": ""}
+        work = client.post("/tk-api/enterprise/work-orders", headers={"X-CSRF-Token": tenant_csrf}, json=work_payload)
+        assert work.status_code == 200
+        assert client.post("/tk-api/enterprise/work-orders", headers={"X-CSRF-Token": tenant_csrf}, json=work_payload).status_code == 409
+        work_payload.update({"id": work.json()["id"], "status": "resolved", "resolution": "系统环境已复检通过"})
+        assert client.post("/tk-api/enterprise/work-orders", headers={"X-CSRF-Token": tenant_csrf}, json=work_payload).status_code == 200
+        assert client.get("/tk-api/enterprise/work-orders").json()["work_orders"][0]["resolved_at"]
+        resolved = client.post(f"/tk-api/enterprise/alerts/{alerts[0]['id']}", headers={"X-CSRF-Token": tenant_csrf}, json={"status": "resolved"})
+        assert resolved.status_code == 200
+        device_update = client.post("/tk-api/enterprise/devices/DEVICE-ENTERPRISE-0001", headers={"X-CSRF-Token": tenant_csrf}, json={"display_name": "一号开播电脑", "room_id": room.json()["id"], "streaming_account_id": account.json()["id"], "store_name": "洛杉矶组", "owner_name": "运营A", "tags": ["重点"]})
+        assert device_update.status_code == 200
+        assert client.get("/tk-api/enterprise/devices").json()["devices"][0]["display_name"] == "一号开播电脑"
+
+
+def test_admin_font_asset_is_served(tmp_path):
+    with build_client(tmp_path) as client:
+        response = client.get("/tk-admin/font/NotoSansSC-VF.ttf")
+        assert response.status_code == 200 and response.headers["content-type"].startswith("font/") and len(response.content) > 1000

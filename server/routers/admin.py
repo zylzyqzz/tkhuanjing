@@ -19,7 +19,7 @@ from ..config import get_settings
 from ..database import get_db
 from ..models import Admin, AuditLog, CheckItem, CheckProfile, CheckReport, Code, Customer, Device, DownloadStat, LiveRoom, Release, Setting, SupportCase, User, UserSession, now_iso
 from ..schemas import CodeGenerateRequest, CodeStatusRequest, CustomerIn, DeviceIn, LoginRequest, ProfileIn, ReleaseActivateIn, RoomIn, SettingsIn, SupportIn
-from ..security import clear_login_attempts, current_admin, make_session, rate_limit_login, request_ip, require_csrf, verify_password
+from ..security import clear_login_attempts, current_admin, make_session, permissions_for, rate_limit_login, request_ip, require_csrf, verify_password
 from ..services import audit, create_codes, file_sha256
 
 
@@ -40,16 +40,19 @@ def login(payload: LoginRequest, request: Request, response: Response, db: Sessi
         audit(db, payload.username[:80], "login_failed", details=ip); db.commit()
         raise HTTPException(status_code=401, detail="账号或密码错误")
     clear_login_attempts(ip)
-    token, csrf = make_session(admin.username)
+    admin.last_login_at = now_iso(); admin.last_login_ip = ip
+    token, csrf = make_session(admin)
     response.set_cookie("tk_session", token, httponly=True, samesite="strict", secure=settings.env == "production", max_age=settings.session_hours * 3600)
     audit(db, admin.username, "login", details=ip)
     db.commit()
-    return {"ok": True, "csrf": csrf, "username": admin.username}
+    return {"ok": True, "csrf": csrf, "username": admin.username, "role": admin.role, "tenant_id": admin.customer_id, "permissions": permissions_for(admin.role)}
 
 
 @router.get("/session")
-def session(admin: dict = Depends(current_admin)) -> dict:
-    return {"logged_in": True, "username": admin["username"], "csrf": admin["csrf"]}
+def session(admin: dict = Depends(current_admin), db: Session = Depends(get_db)) -> dict:
+    tenant = db.get(Customer, admin.get("customer_id")) if admin.get("customer_id") else None
+    subscription = None if not tenant else {"plan_code": tenant.plan_code, "device_limit": tenant.device_limit, "expires_at": tenant.subscription_expires_at, "grace_ends_at": tenant.grace_ends_at}
+    return {"logged_in": True, "username": admin["username"], "csrf": admin["csrf"], "role": admin.get("role", "platform_super"), "tenant_id": admin.get("customer_id"), "permissions": permissions_for(admin.get("role", "platform_super")), "tenant_status": tenant.status if tenant else "platform", "subscription_summary": subscription}
 
 
 @router.post("/logout")
