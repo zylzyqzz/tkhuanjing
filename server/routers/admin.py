@@ -35,6 +35,7 @@ def login(payload: LoginRequest, request: Request, response: Response, db: Sessi
     rate_limit_login(ip)
     admin = db.scalar(select(Admin).where(Admin.username == payload.username, Admin.active.is_(True)))
     if not admin or not verify_password(payload.password, admin.password_hash):
+        audit(db, payload.username[:80], "login_failed", details=ip); db.commit()
         raise HTTPException(status_code=401, detail="账号或密码错误")
     clear_login_attempts(ip)
     token, csrf = make_session(admin.username)
@@ -50,8 +51,9 @@ def session(admin: dict = Depends(current_admin)) -> dict:
 
 
 @router.post("/logout")
-def logout(response: Response, admin: dict = Depends(require_csrf)) -> dict:
+def logout(response: Response, admin: dict = Depends(require_csrf), db: Session = Depends(get_db)) -> dict:
     response.delete_cookie("tk_session")
+    audit(db, admin["username"], "logout"); db.commit()
     return {"ok": True}
 
 

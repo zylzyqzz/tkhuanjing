@@ -1,0 +1,18 @@
+services:
+  tk-platform-staging:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: tk-platform-staging
+    env_file:
+      - .env.staging
+    ports:
+      - "127.0.0.1:18081:8000"
+    volumes:
+      - /opt/tk-platform/staging-runtime:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s

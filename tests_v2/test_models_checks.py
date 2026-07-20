@@ -50,7 +50,7 @@ def test_report_precedence_and_schema():
     assert report.overall_status == Status.WARNING
     assert report.blocking_count == 0
     payload = report.to_dict()
-    assert payload["schema_version"] == 5
+    assert payload["schema_version"] == 6
     assert payload["run_mode"] == "daily_preflight"
     assert "check_logs" in payload and "environment_snapshot" in payload
     assert report.to_dict()["items"][1]["status"] == "FAIL"

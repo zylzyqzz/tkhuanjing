@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import CheckItem, CheckProfile, CheckReport, Code, Device, LicenseEvent, Release, User, UserSession, VerificationCode, now_iso
 from ..schemas import ActivateRequest, AuthorizeRequest, ForgotPasswordRequest, RegisterRequest, ReportIn, ResetPasswordRequest, SendCodeRequest, UserLoginRequest, UserProfileUpdate, UserRegisterRequest
-from ..security import current_device, current_user, hash_token, hasher, user_from_token, verify_password
+from ..security import current_device, current_user, enforce_rate_limit, hash_token, hasher, request_ip, user_from_token, verify_password
 from ..services import DEFAULT_PROFILE, release_manifest
 from ..config import get_settings
 from ..email_utils import send_verification_code
@@ -30,7 +30,8 @@ def license_view(device: Device, db: Session) -> dict:
 
 
 @router.post("/register")
-def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> dict:
+def register(payload: RegisterRequest, request: Request, db: Session = Depends(get_db)) -> dict:
+    enforce_rate_limit("device-register", request_ip(request), 20, 3600)
     token = secrets.token_urlsafe(32)
     device = db.get(Device, payload.device_id)
     if not device:
@@ -132,7 +133,8 @@ def authorize(
 
 @router.post("/reports")
 @router.post("/setup-reports")
-def upload_report(payload: ReportIn, device: Device = Depends(current_device), db: Session = Depends(get_db)) -> dict:
+def upload_report(payload: ReportIn, request: Request, device: Device = Depends(current_device), db: Session = Depends(get_db)) -> dict:
+    enforce_rate_limit("report-upload", f"{request_ip(request)}:{device.device_id}", 60, 3600)
     if db.get(CheckReport, payload.report_id):
         return {"ok": True, "idempotent": True, "report_id": payload.report_id}
     item_rows = [CheckItem(
@@ -145,6 +147,8 @@ def upload_report(payload: ReportIn, device: Device = Depends(current_device), d
         repair_level=item.repair_level, verification_json=json.dumps(item.verification_check_ids, ensure_ascii=False),
         duration_ms=item.duration_ms, error_code=item.error_code, priority=item.priority, blocking=False,
         repair_outcome_json=json.dumps(item.repair_outcome, ensure_ascii=False),
+        sampled_at=item.sampled_at, recheck_of=item.recheck_of, retryable=item.retryable,
+        technical_error=item.technical_error, restart_required=item.restart_required,
     ) for item in payload.items]
     decision = authoritative_report(item_rows)
     ai_analysis = explain(decision, payload.ip_profile)
@@ -249,7 +253,8 @@ def _gen_code(settings) -> str:
 
 
 @router.post("/auth/send-code")
-def auth_send_code(payload: SendCodeRequest, db: Session = Depends(get_db)) -> dict:
+def auth_send_code(payload: SendCodeRequest, request: Request, db: Session = Depends(get_db)) -> dict:
+    enforce_rate_limit("verification-code", f"{request_ip(request)}:{payload.target.lower()}", 5, 3600)
     if payload.purpose not in ("register", "reset_password"):
         raise HTTPException(status_code=400, detail="无效的验证码用途")
     settings = get_settings()
@@ -277,7 +282,8 @@ def auth_send_code(payload: SendCodeRequest, db: Session = Depends(get_db)) -> d
 
 
 @router.post("/auth/register")
-def auth_register(payload: UserRegisterRequest, db: Session = Depends(get_db)) -> dict:
+def auth_register(payload: UserRegisterRequest, request: Request, db: Session = Depends(get_db)) -> dict:
+    enforce_rate_limit("user-register", request_ip(request), 10, 3600)
     if db.scalar(select(User).where(User.phone == payload.phone)):
         raise HTTPException(status_code=409, detail="手机号已注册")
     now = datetime.now(timezone.utc)
@@ -302,7 +308,8 @@ def auth_register(payload: UserRegisterRequest, db: Session = Depends(get_db)) -
 
 
 @router.post("/auth/login")
-def auth_login(payload: UserLoginRequest, db: Session = Depends(get_db)) -> dict:
+def auth_login(payload: UserLoginRequest, request: Request, db: Session = Depends(get_db)) -> dict:
+    enforce_rate_limit("user-login", f"{request_ip(request)}:{payload.phone}", 8, 600)
     user = db.scalar(select(User).where(User.phone == payload.phone))
     if user is None or user.status != "active" or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="手机号或密码错误")
@@ -316,7 +323,8 @@ def auth_login(payload: UserLoginRequest, db: Session = Depends(get_db)) -> dict
 
 
 @router.post("/auth/forgot-password")
-def auth_forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)) -> dict:
+def auth_forgot_password(payload: ForgotPasswordRequest, request: Request, db: Session = Depends(get_db)) -> dict:
+    enforce_rate_limit("forgot-password", f"{request_ip(request)}:{payload.phone}", 5, 3600)
     settings = get_settings()
     user = db.scalar(select(User).where(User.phone == payload.phone))
     if user is not None and user.email:
@@ -331,12 +339,13 @@ def auth_forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(g
 
 
 @router.post("/auth/reset-password")
-def auth_reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)) -> dict:
+def auth_reset_password(payload: ResetPasswordRequest, request: Request, db: Session = Depends(get_db)) -> dict:
+    enforce_rate_limit("reset-password", f"{request_ip(request)}:{payload.phone}", 8, 3600)
     settings = get_settings()
     now = datetime.now(timezone.utc)
     user = db.scalar(select(User).where(User.phone == payload.phone))
     if user is None:
-        raise HTTPException(status_code=400, detail="账号不存在")
+        raise HTTPException(status_code=400, detail="验证码错误或已过期")
     vc = db.scalar(
         select(VerificationCode)
         .where(VerificationCode.target == user.email, VerificationCode.purpose == "reset_password", VerificationCode.used == 0)

@@ -29,7 +29,7 @@ def manifest_payload(manifest: dict) -> bytes:
 def verify_manifest(manifest: dict) -> None:
     signature, public_key = manifest.get("signature", ""), manifest.get("public_key", "")
     if not signature and not public_key:
-        return  # Local candidate builds may be unsigned; production configuration supplies both.
+        raise UpdateError("更新清单未签名，已拒绝下载")
     if not signature or not public_key:
         raise UpdateError("更新签名信息不完整")
     try:
@@ -73,4 +73,3 @@ def launch_helper(installer: Path) -> None:
         helper = candidate if candidate.exists() else helper
     if not helper.exists(): raise UpdateError("独立更新助手缺失，请重新安装客户端")
     subprocess.Popen([str(helper), "--installer", str(installer), "--wait-pid", str(os.getpid()), "--restart", str(sys.executable)], close_fds=True)
-

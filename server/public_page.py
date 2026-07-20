@@ -6,7 +6,9 @@ from .models import Release
 
 
 DISCLAIMER = "本产品仅判断电脑、网络、设备和直播软件的技术准备情况，不代表平台账号审核、流量或开播权限结果。"
-SITE_VERSION = "2.9.1"
+from client_v2.product import APP_VERSION
+
+SITE_VERSION = APP_VERSION
 
 
 def _lines(value: str, fallback: list[str]) -> list[str]:

@@ -13,6 +13,11 @@ class CheckEvent:
     level: str = "info"
     progress: int = 0
     timestamp: str = ""
+    title: str = ""
+    value: str = ""
+    status: str = ""
+    current: int = 0
+    total: int = 0
 
     def __post_init__(self) -> None:
         if not self.timestamp:

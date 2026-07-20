@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import httpx
 
+from .product import APP_VERSION
+
 
 class ApiError(RuntimeError):
     pass
@@ -17,12 +19,14 @@ class ClientApi:
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         try:
-            with httpx.Client(base_url=self.base_url, timeout=httpx.Timeout(12, connect=5), headers={"User-Agent": "VDLiveCheck/2.9.1", **headers}) as client:
+            with httpx.Client(base_url=self.base_url, timeout=httpx.Timeout(12, connect=5), headers={"User-Agent": f"VDLiveCheck/{APP_VERSION}", **headers}) as client:
                 response = client.request(method, path, **kwargs)
             if response.is_error:
                 body = response.json()
-                message = body.get("error", {}).get("message") if isinstance(body.get("error"), dict) else body.get("detail")
-                raise ApiError(message or f"服务返回 {response.status_code}")
+                error = body.get("error", {}) if isinstance(body, dict) else {}
+                message = error.get("message") if isinstance(error, dict) else body.get("detail")
+                request_id = error.get("request_id", "") if isinstance(error, dict) else ""
+                raise ApiError((message or f"服务返回 {response.status_code}") + (f" [{request_id[:8]}]" if request_id else ""))
             return response.json()
         except (httpx.HTTPError, ValueError) as exc:
             raise ApiError(f"无法连接服务：{exc}") from exc
@@ -66,6 +70,9 @@ class ClientApi:
         response = self.request("POST", "/api/v1/client/auth/login", json={"phone": phone, "password": password})
         self.token = response["token"]
         return response
+
+    def validate_user_session(self) -> dict:
+        return self.get_user_profile()
 
     def auth_send_code(self, target: str, purpose: str = "register") -> dict:
         return self.request("POST", "/api/v1/client/auth/send-code", json={"target": target, "purpose": purpose})

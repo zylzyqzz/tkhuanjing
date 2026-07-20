@@ -31,7 +31,7 @@ def test_atomic_storage_config_reports_and_queue(tmp_path, monkeypatch):
     report = {"report_id": "REPORT-0001", "room_name": "直播间", "checked_at": "2026"}
     storage.save_report(report); assert storage.load_reports()[0]["report_id"] == "REPORT-0001"
     storage.queue_report("REPORT-0001"); storage.queue_report("REPORT-0001")
-    assert storage.load_json(storage.QUEUE_FILE, []) == ["REPORT-0001"]
+    assert storage.load_json(storage.QUEUE_FILE, []) == [{"report_id": "REPORT-0001", "attempts": 0, "last_error": ""}]
 
 
 def test_signed_manifest_validation():

@@ -19,6 +19,7 @@ from .models import DownloadStat, Release, Setting, now_iso
 from .public_page import render_home, unavailable_page
 from .migrate import run as migrate
 from .routers import admin, client
+from client_v2.product import APP_NAME, APP_VERSION, REPORT_SCHEMA_VERSION
 
 
 settings = get_settings()
@@ -29,7 +30,7 @@ if not logger.handlers:
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     logger.addHandler(handler)
 
-app = FastAPI(title="VD开播助手管理平台", version="2.9.1", docs_url="/api/docs" if settings.env != "production" else None)
+app = FastAPI(title=f"{APP_NAME}管理平台", version=APP_VERSION, docs_url="/api/docs" if settings.env != "production" else None)
 app.include_router(client.router, prefix="/api/v1/client")
 app.include_router(client.router, prefix="/api/client", include_in_schema=False)
 app.include_router(admin.router)
@@ -50,6 +51,7 @@ def health() -> dict:
         "version": app.version,
         "database": "ok" if database_ok else "error",
         "admin_assets": "ok" if assets_ok else "missing",
+        "report_schema": REPORT_SCHEMA_VERSION,
     }
 
 

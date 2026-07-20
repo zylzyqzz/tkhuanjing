@@ -81,7 +81,7 @@ def _priority(check_id: str, status: Status) -> str:
     # The launch gate is intentionally limited to software/environment
     # failures. Network quality, IP/provider intelligence and hardware are
     # reported as advice only, even when their measurements are poor.
-    if check_id.startswith(("system.", "environment.", "streaming.", "client.")):
+    if check_id.startswith(("system.", "environment.")):
         return "BLOCKING" if status == Status.FAIL else "ADVISORY"
     if check_id.startswith("network."):
         return "ADVISORY"
@@ -341,6 +341,19 @@ PLUGINS = [
     CheckPlugin("system",    "系统环境", 30, system_checks),
     CheckPlugin("performance", "电脑性能", 30, performance_checks),
 ]
+
+
+def validate_plugins() -> None:
+    allowed = {"network", "system", "performance"}
+    identifiers = [plugin.plugin_id for plugin in PLUGINS]
+    if set(identifiers) != allowed or len(identifiers) != len(allowed):
+        raise RuntimeError(f"invalid check registry: {identifiers}")
+    for plugin in PLUGINS:
+        if not plugin.title or plugin.timeout <= 0 or not callable(plugin.run):
+            raise RuntimeError(f"invalid check plugin: {plugin.plugin_id}")
+
+
+validate_plugins()
 
 
 def run_checks(ctx: CheckContext, progress: Callable[[int, str], None]) -> list[CheckResult]:

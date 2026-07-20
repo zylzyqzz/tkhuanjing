@@ -14,6 +14,9 @@ from .security import seed_admin
 from .services import seed_defaults
 
 
+MIGRATION_VERSION = 6
+
+
 REQUIRED_COLUMNS = {
     "users": [
         "phone_country text default '+86'", "email text default ''", "company_name text default ''",
@@ -65,6 +68,8 @@ REQUIRED_COLUMNS = {
         "duration_ms integer default 0", "error_code text default ''",
         "priority text default 'INFORMATIONAL'", "blocking integer default 0",
         "repair_outcome_json text default '{}'",
+        "sampled_at text default ''", "recheck_of text default ''", "retryable integer default 0",
+        "technical_error text default ''", "restart_required integer default 0",
     ],
 }
 
@@ -103,8 +108,19 @@ def run(legacy: Path | None = None) -> Path | None:
         if legacy and legacy.exists() and not target.exists():
             shutil.copy2(legacy, target)
         if target.exists():
-            backup(target)
-            add_compatible_columns(target)
+            with sqlite3.connect(target) as conn:
+                conn.execute("create table if not exists schema_migrations (version integer primary key, applied_at text not null)")
+                current = conn.execute("select coalesce(max(version),0) from schema_migrations").fetchone()[0]
+            if current < MIGRATION_VERSION:
+                snapshot = backup(target)
+                try:
+                    add_compatible_columns(target)
+                    with sqlite3.connect(target) as conn:
+                        conn.execute("insert or replace into schema_migrations(version,applied_at) values(?,?)", (MIGRATION_VERSION, datetime.now().isoformat()))
+                        conn.commit()
+                except Exception:
+                    shutil.copy2(snapshot, target)
+                    raise
     Base.metadata.create_all(engine)
     with SessionLocal() as db:
         seed_admin(db)

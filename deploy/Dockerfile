@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir --timeout 45 --retries 5 \
     -r /tmp/requirements-server.txt
 
 COPY server /app/server
-COPY client_v2/__init__.py client_v2/regions.py /app/client_v2/
+COPY client_v2/__init__.py client_v2/product.py client_v2/regions.py /app/client_v2/
 COPY admin/dist /app/admin/dist
 COPY assets/logo-web.png /app/assets/logo-web.png
 

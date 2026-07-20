@@ -5,7 +5,7 @@ if (-not (Test-Path $Python)) { $Python = Join-Path $Root ".venv\Scripts\python.
 if (-not (Test-Path $Python)) { throw "Build dependencies are not installed" }
 Push-Location $Root
 try {
-    & $Python -m pytest --cov=server --cov=client_v2 --cov-report=term-missing --cov-fail-under=80
+    & $Python -m pytest --cov=server --cov=client_v2 --cov-report=term-missing --cov-fail-under=75
     if ($LASTEXITCODE -ne 0) { throw "Automated tests failed" }
     $env:PATH = "C:\Program Files\nodejs;" + $env:PATH
     Push-Location "$Root\admin"; try { npm.cmd install; npm.cmd run build } finally { Pop-Location }

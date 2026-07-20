@@ -1,5 +1,5 @@
 #define MyAppName "TK 管理后台（本地版）"
-#define MyAppVersion "2.4.0"
+#define MyAppVersion "2.10.0"
 
 [Setup]
 AppId={{DF5D0A8C-071A-4F2D-8708-1EF46C12CA25}

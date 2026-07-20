@@ -11,6 +11,8 @@ class ResultScreen(QWidget):
     launch_requested = Signal()
     recheck_requested = Signal()
     export_requested = Signal()
+    upload_requested = Signal()
+    history_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -19,7 +21,7 @@ class ResultScreen(QWidget):
         self.hero = QFrame(); self.hero.setProperty("card", True); hero_box = QVBoxLayout(self.hero); self.hero_title = QLabel("尚未检测"); self.hero_title.setProperty("title", True); hero_box.addWidget(self.hero_title); self.hero_text = QLabel("完成检测后生成结论"); self.hero_text.setWordWrap(True); hero_box.addWidget(self.hero_text); self.body.addWidget(self.hero)
         self.attention_title = QLabel("需要关注的项目"); self.attention_title.setProperty("subhead", True); self.body.addWidget(self.attention_title)
         self.attention = QVBoxLayout(); self.body.addLayout(self.attention)
-        actions = QHBoxLayout(); self.primary = QPushButton("开始开播"); self.primary.setProperty("primary", True); self.primary.clicked.connect(self._primary); actions.addWidget(self.primary); self.recheck = QPushButton("重新检测"); self.recheck.clicked.connect(self.recheck_requested); actions.addWidget(self.recheck); export = QPushButton("导出 JSON 报告"); export.clicked.connect(self.export_requested); actions.addWidget(export); actions.addStretch(); self.body.addLayout(actions)
+        actions = QHBoxLayout(); self.primary = QPushButton("开始开播"); self.primary.setProperty("primary", True); self.primary.clicked.connect(self._primary); actions.addWidget(self.primary); self.recheck = QPushButton("重新检测"); self.recheck.clicked.connect(self.recheck_requested); actions.addWidget(self.recheck); export = QPushButton("导出"); export.clicked.connect(self.export_requested); actions.addWidget(export); upload=QPushButton("上传"); upload.clicked.connect(self.upload_requested); actions.addWidget(upload); history=QPushButton("历史"); history.clicked.connect(self.history_requested); actions.addWidget(history); actions.addStretch(); self.body.addLayout(actions)
         self.toggle = QToolButton(); self.toggle.setText("查看完整检测结果"); self.toggle.setCheckable(True); self.toggle.toggled.connect(self._toggle); self.body.addWidget(self.toggle)
         self.complete_widget = QWidget(); self.complete = QVBoxLayout(self.complete_widget); self.complete_widget.hide(); self.body.addWidget(self.complete_widget)
         self.reports = QVBoxLayout(); self.body.addLayout(self.reports); self.body.addStretch()

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from client_v2.models import CheckReport, CheckResult, Status
 from client_v2.storage import baseline_delta
-from client_v2.ui.theme import THEMES, apply_theme
+from client_v2.ui.tokens import ACCENT, BG_APP
 
 from test_backend_api import admin_login, build_client
 
@@ -69,8 +69,7 @@ def test_v5_readiness_priorities_baseline_and_themes():
     advisory.finalize()
     assert advisory.readiness_level == "READY_WITH_RISK"
     payload = blocked.to_dict()
-    assert payload["schema_version"] == 5 and payload["items"][0]["priority"] == "ADVISORY"
+    assert payload["schema_version"] == 6 and payload["items"][0]["priority"] == "ADVISORY"
     delta = baseline_delta({"network_snapshot":{"network.throughput":{"upload_mbps":20}},"items":[]}, {"network_snapshot":{"network.throughput":{"upload_mbps":12}},"items":[]})
     assert delta["upload_mbps"]["change"] == 8
-    assert set(THEMES) == {"obsidian", "cyber", "daylight"}
-    assert "#EAF1F8" in apply_theme("daylight") and "#7A74FF" in apply_theme("cyber")
+    assert ACCENT == "#2563EB" and BG_APP == "#F0F2F7"

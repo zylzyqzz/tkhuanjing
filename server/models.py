@@ -175,6 +175,11 @@ class CheckItem(Base):
     priority: Mapped[str] = mapped_column(String(30), default="INFORMATIONAL")
     blocking: Mapped[bool] = mapped_column(Boolean, default=False)
     repair_outcome_json: Mapped[str] = mapped_column(Text, default="{}")
+    sampled_at: Mapped[str] = mapped_column(String(50), default="")
+    recheck_of: Mapped[str] = mapped_column(String(80), default="")
+    retryable: Mapped[bool] = mapped_column(Boolean, default=False)
+    technical_error: Mapped[str] = mapped_column(Text, default="")
+    restart_required: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class CheckProfile(Base):

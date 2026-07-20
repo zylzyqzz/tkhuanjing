@@ -33,7 +33,7 @@ def test_v4_environment_report_contract():
     )
     report.finalize()
     payload = report.to_dict()
-    assert payload["schema_version"] == 5
+    assert payload["schema_version"] == 6
     assert payload["run_mode"] == "environment_setup"
     assert payload["before_snapshot"]["timezone"] == "A"
     assert payload["check_logs"][0]["module"] == "network"

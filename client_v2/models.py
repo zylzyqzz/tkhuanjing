@@ -6,6 +6,8 @@ from enum import StrEnum
 from typing import Any
 import uuid
 
+from .product import REPORT_SCHEMA_VERSION
+
 
 class Status(StrEnum):
     PASS = "PASS"
@@ -49,6 +51,11 @@ class CheckResult:
     priority: str = "INFORMATIONAL"
     blocking: bool = False
     repair_outcome: dict[str, Any] = field(default_factory=dict)
+    sampled_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    recheck_of: str = ""
+    retryable: bool = False
+    technical_error: str = ""
+    restart_required: bool = False
 
     def __post_init__(self) -> None:
         # V2 checkers remain readable while every result gains the V3 problem model.
@@ -135,7 +142,8 @@ class CheckReport:
             self.conclusion = "技术准备检查通过，可以开始直播"
         unknown = sum(1 for item in self.items if item.status == Status.UNKNOWN)
         self.issue_tags = sorted({tag for item in self.items for tag in _issue_tags(item)})
-        self.environment_summary = "暂不建议开播" if self.blocking_count else "需要一键修复" if any(i.repairable and i.status in {Status.FAIL, Status.WARNING} for i in self.items if not i.check_id.startswith(("network.", "performance.", "devices."))) else "正常"
+        system_items = [i for i in self.items if i.check_id.startswith(("system.", "environment."))]
+        self.environment_summary = "暂不建议开播" if self.blocking_count else "需要一键修复" if any(i.repairable and i.status in {Status.FAIL, Status.WARNING} for i in system_items) else "正常"
         network_items = [i for i in self.items if i.check_id.startswith("network.")]
         if any(i.status == Status.UNKNOWN for i in network_items):
             self.network_summary = "待核实"
@@ -152,7 +160,7 @@ class CheckReport:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "schema_version": 5, "report_id": self.report_id, "device_id": self.device_id,
+            "schema_version": REPORT_SCHEMA_VERSION, "report_id": self.report_id, "device_id": self.device_id,
             "app_version": self.app_version, "checked_at": self.checked_at,
             "run_mode": self.run_mode,
             "target_region_id": self.target_region_id,
@@ -176,12 +184,31 @@ class CheckReport:
             "disclaimer": "本报告仅说明网络环境、系统环境和电脑性能，不代表平台账号审核、流量或开播权限结果。",
         }
 
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "CheckReport":
+        item_fields = set(CheckResult.__dataclass_fields__)
+        items = []
+        for raw in value.get("items", []):
+            data = {key: item for key, item in raw.items() if key in item_fields}
+            try: data["status"] = Status(data.get("status", "UNKNOWN"))
+            except ValueError: data["status"] = Status.UNKNOWN
+            items.append(CheckResult(**data))
+        report_fields = set(cls.__dataclass_fields__) - {"items"}
+        data = {key: item for key, item in value.items() if key in report_fields}
+        try: data["overall_status"] = Status(data.get("overall_status", "UNKNOWN"))
+        except ValueError: data["overall_status"] = Status.UNKNOWN
+        return cls(items=items, **data)
+
 
 def _issue_tags(item: CheckResult) -> list[str]:
     if item.status == Status.PASS:
         return []
-    if item.check_id.startswith(("system.", "environment.", "streaming.", "client.")):
+    if item.check_id.startswith(("system.", "environment.")):
         return ["电脑环境异常" if item.status == Status.FAIL else "电脑环境建议"]
     if item.check_id.startswith("network."):
         return ["网络问题" if item.status == Status.FAIL else "网络待关注" if item.status == Status.WARNING else "网络待核实"]
-    return ["其他待关注"]
+    if item.check_id.startswith("performance."):
+        return ["硬件参考"]
+    # V4/V5 reports can contain retired categories. They remain readable but
+    # are deliberately excluded from current readiness tags and statistics.
+    return []

@@ -22,6 +22,7 @@ settings = get_settings()
 hasher = PasswordHasher()
 serializer = URLSafeTimedSerializer(settings.session_secret, salt="tk-admin-session-v2")
 login_attempts: dict[str, deque[float]] = defaultdict(deque)
+rate_buckets: dict[str, deque[float]] = defaultdict(deque)
 
 
 def hash_token(value: str) -> str:
@@ -56,6 +57,16 @@ def rate_limit_login(ip: str) -> None:
 
 def clear_login_attempts(ip: str) -> None:
     login_attempts.pop(ip, None)
+
+
+def enforce_rate_limit(scope: str, key: str, limit: int, window_seconds: int) -> None:
+    bucket_key = hashlib.sha256(f"{scope}:{key}".encode()).hexdigest()
+    now = time.monotonic(); bucket = rate_buckets[bucket_key]
+    while bucket and now - bucket[0] > window_seconds:
+        bucket.popleft()
+    if len(bucket) >= limit:
+        raise HTTPException(status_code=429, detail="请求过于频繁，请稍后再试")
+    bucket.append(now)
 
 
 def make_session(username: str) -> tuple[str, str]:

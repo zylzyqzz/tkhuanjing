@@ -16,6 +16,7 @@ CONFIG_FILE = DATA_DIR / "config-v2.json"
 LICENSE_FILE = DATA_DIR / "license-v2.json"
 USER_FILE = DATA_DIR / "user-v2.json"
 QUEUE_FILE = DATA_DIR / "pending-sync.json"
+CREDENTIAL_FILE = DATA_DIR / "credentials-v2.json"
 
 DEFAULT_CONFIG = {
     "schema_version": 8, "target_region_id": "us-los-angeles", "target_host": "tk.aimj.xin",
@@ -66,6 +67,7 @@ def fingerprint() -> str:
 
 def load_config() -> dict:
     config = load_json(CONFIG_FILE, DEFAULT_CONFIG)
+    needs_save = False
     legacy_regions = {
         "US-Los Angeles": "us-los-angeles", "US-New York": "us-new-york",
         "UK-London": "uk-london", "DE-Frankfurt": "de-frankfurt",
@@ -108,15 +110,31 @@ def load_config() -> dict:
         config["schema_version"] = 8
     for key, value in DEFAULT_CONFIG.items():
         config.setdefault(key, value)
+    if config.get("device_token"):
+        from .credentials import CredentialStore
+        store = CredentialStore(CREDENTIAL_FILE); values = store.load(); values["device_token"] = config.pop("device_token"); store.save(values)
+        needs_save = True
     if not config["device_id"]:
         config["device_id"] = fingerprint()
+        needs_save = True
+    if needs_save:
         save_config(config)
     return config
 
 
 def save_config(config: dict) -> None:
     config["schema_version"] = 8
-    atomic_json(CONFIG_FILE, config)
+    atomic_json(CONFIG_FILE, {key: value for key, value in config.items() if key not in {"device_token", "user_token"}})
+
+
+def load_credentials() -> dict[str, str]:
+    from .credentials import CredentialStore
+    return CredentialStore(CREDENTIAL_FILE).load()
+
+
+def save_credentials(**values: str) -> None:
+    from .credentials import CredentialStore
+    store = CredentialStore(CREDENTIAL_FILE); current = store.load(); current.update({k: v for k, v in values.items() if v}); store.save(current)
 
 
 def load_license() -> dict:
@@ -175,22 +193,42 @@ def baseline_delta(current: dict, previous: dict | None) -> dict:
     return changes
 
 
-def queue_report(report_id: str) -> None:
+def queue_report(report_id: str, error: str = "") -> None:
     queue = load_json(QUEUE_FILE, [])
-    if report_id not in queue:
-        queue.append(report_id)
+    legacy = [item for item in queue if isinstance(item, str)]
+    queue = [item if isinstance(item, dict) else {"report_id": item, "attempts": 0, "last_error": ""} for item in queue]
+    if report_id not in legacy and not any(item.get("report_id") == report_id for item in queue):
+        queue.append({"report_id": report_id, "attempts": 0, "last_error": error})
         atomic_json(QUEUE_FILE, queue)
+
+
+def update_queued_report(report_id: str, *, success: bool, error: str = "") -> None:
+    queue = [item if isinstance(item, dict) else {"report_id": item, "attempts": 0, "last_error": ""} for item in load_json(QUEUE_FILE, [])]
+    if success:
+        queue = [item for item in queue if item.get("report_id") != report_id]
+    else:
+        for item in queue:
+            if item.get("report_id") == report_id:
+                item["attempts"] = int(item.get("attempts", 0)) + 1; item["last_error"] = error[:500]
+    atomic_json(QUEUE_FILE, queue)
 
 
 # ── User session ──────────────────────────────────────────────
 
-DEFAULT_USER = {"logged_in": False, "token": "", "profile": {}}
+DEFAULT_USER = {"logged_in": False, "profile": {}}
 
 def load_user() -> dict:
-    return load_json(USER_FILE, DEFAULT_USER)
+    value = load_json(USER_FILE, DEFAULT_USER)
+    token = value.pop("token", "")
+    if token:
+        save_credentials(user_token=token)
+    value["token"] = load_credentials().get("user_token", "")
+    return value
 
 def save_user(value: dict) -> None:
-    atomic_json(USER_FILE, value)
+    token = value.get("token", "")
+    if token: save_credentials(user_token=token)
+    atomic_json(USER_FILE, {key: item for key, item in value.items() if key != "token"})
 
 def set_user_session(token: str, profile: dict) -> None:
     ensure_dirs()
@@ -198,4 +236,6 @@ def set_user_session(token: str, profile: dict) -> None:
 
 def clear_user_session() -> None:
     ensure_dirs()
-    save_user({"logged_in": False, "token": "", "profile": {}})
+    from .credentials import CredentialStore
+    CredentialStore(CREDENTIAL_FILE).clear("user_token")
+    atomic_json(USER_FILE, {"logged_in": False, "profile": {}})

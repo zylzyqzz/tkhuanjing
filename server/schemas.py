@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from client_v2.product import CURRENT_CHECK_PREFIXES, REPORT_SCHEMA_VERSION, SUPPORTED_REPORT_SCHEMAS
 
 
 Status = Literal["PASS", "WARNING", "FAIL", "UNKNOWN"]
@@ -49,6 +51,12 @@ class CheckItemIn(BaseModel):
     priority: Literal["BLOCKING", "HIGH_RISK", "ADVISORY", "INFORMATIONAL"] = "INFORMATIONAL"
     blocking: bool = False
     repair_outcome: dict[str, Any] = Field(default_factory=dict)
+    sampled_at: str = Field(default="", max_length=50)
+    recheck_of: str = Field(default="", max_length=80)
+    retryable: bool = False
+    technical_error: str = Field(default="", max_length=5000)
+    restart_required: bool = False
+
 
 
 class ReportIn(BaseModel):
@@ -59,7 +67,7 @@ class ReportIn(BaseModel):
     checked_at: str = Field(max_length=50)
     overall_status: Status
     conclusion: str = Field(default="", max_length=2000)
-    schema_version: int = Field(default=4, ge=1, le=10)
+    schema_version: int = Field(default=REPORT_SCHEMA_VERSION, ge=1, le=REPORT_SCHEMA_VERSION)
     run_mode: Literal["daily_preflight", "environment_setup"] = "daily_preflight"
     target_region_id: str = Field(default="us-los-angeles", max_length=80)
     network_snapshot: dict[str, Any] = Field(default_factory=dict)
@@ -85,6 +93,19 @@ class ReportIn(BaseModel):
     hardware_summary: str = Field(default="仅供参考", max_length=100)
     next_action: str = Field(default="", max_length=1000)
     items: list[CheckItemIn] = Field(max_length=300)
+
+    @field_validator("schema_version")
+    @classmethod
+    def supported_schema(cls, value: int) -> int:
+        if value not in SUPPORTED_REPORT_SCHEMAS:
+            raise ValueError("不支持的报告 Schema")
+        return value
+
+    @model_validator(mode="after")
+    def current_schema_scope(self):
+        if self.schema_version == REPORT_SCHEMA_VERSION and any(not item.check_id.startswith(CURRENT_CHECK_PREFIXES) for item in self.items):
+            raise ValueError("当前报告只允许网络、系统环境和电脑性能检查")
+        return self
 
 
 class CodeGenerateRequest(BaseModel):

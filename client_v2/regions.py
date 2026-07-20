@@ -12,8 +12,29 @@ class RegionProfile:
     iana_timezone: str
     culture: str
     group: str
-    preferred_dns: str = "1.1.1.1"
-    alternate_dns: str = "1.0.0.1"
+    preferred_dns: str = ""
+    alternate_dns: str = ""
+    dns_source: str = "VD Nexus 区域配置表"
+    dns_maintained_at: str = "2026-07-20"
+
+    def __post_init__(self) -> None:
+        pairs = {
+            "north_america": ("1.1.1.1", "8.8.8.8"),
+            "europe": ("9.9.9.9", "1.1.1.1"),
+            "southeast_asia": ("1.1.1.1", "8.8.8.8"),
+            "east_asia": ("1.1.1.1", "8.8.8.8"),
+            "middle_east": ("9.9.9.9", "1.1.1.1"),
+            "south_america": ("1.1.1.1", "8.8.8.8"),
+            "oceania": ("1.1.1.1", "9.9.9.9"),
+            "south_asia": ("1.1.1.1", "8.8.8.8"),
+            "africa": ("1.1.1.1", "9.9.9.9"),
+            "central_asia": ("9.9.9.9", "1.1.1.1"),
+        }
+        preferred, alternate = pairs.get(self.group, ("1.1.1.1", "8.8.8.8"))
+        if self.country_code == "CN":
+            preferred, alternate = "223.5.5.5", "119.29.29.29"
+        object.__setattr__(self, "preferred_dns", self.preferred_dns or preferred)
+        object.__setattr__(self, "alternate_dns", self.alternate_dns or alternate)
 
     @property
     def probes(self) -> tuple[str, ...]:
