@@ -13,6 +13,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from client_v2.product import APP_VERSION
+
 from ..config import get_settings
 from ..database import get_db
 from ..models import Admin, AuditLog, CheckItem, CheckProfile, CheckReport, Code, Customer, Device, DownloadStat, LiveRoom, Release, Setting, SupportCase, User, UserSession, now_iso
@@ -70,6 +72,7 @@ def stats(_admin: dict = Depends(current_admin), db: Session = Depends(get_db)) 
     downloads_today = db.scalar(select(func.sum(DownloadStat.count)).where(DownloadStat.day == today)) or 0
     readiness = dict(db.execute(select(CheckReport.readiness_level, func.count()).where(CheckReport.checked_at.startswith(today)).group_by(CheckReport.readiness_level)).all())
     return {
+        "product_version": APP_VERSION,
         "customers": db.scalar(select(func.count()).select_from(Customer)) or 0,
         "rooms": db.scalar(select(func.count()).select_from(LiveRoom)) or 0,
         "devices": db.scalar(select(func.count()).select_from(Device)) or 0,
