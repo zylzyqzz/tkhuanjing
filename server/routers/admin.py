@@ -349,8 +349,8 @@ def save_homepage(payload: SettingsIn, admin: dict = Depends(require_csrf), db: 
         raise HTTPException(422, "主页资料字段不正确")
     if not payload.values.get("home_hero_title", "").strip() or not payload.values.get("product_name", "").strip():
         raise HTTPException(422, "产品名称和主页标题不能为空")
-    if "product_features" in payload.values and len([line for line in payload.values["product_features"].splitlines() if line.strip()]) != 7:
-        raise HTTPException(422, "检测能力必须填写 7 项，每行一项")
+    if "product_features" in payload.values and len([line for line in payload.values["product_features"].splitlines() if line.strip()]) != 3:
+        raise HTTPException(422, "三类报告必须填写 3 项，每行一项")
     for key, value in payload.values.items():
         row = db.get(Setting, key)
         if row: row.value = value.strip()

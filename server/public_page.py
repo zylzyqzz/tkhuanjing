@@ -5,7 +5,7 @@ import html
 from .models import Release
 
 
-DISCLAIMER = "本产品仅判断电脑、网络、设备和直播软件的技术准备情况，不代表平台账号审核、流量或开播权限结果。"
+DISCLAIMER = "本产品仅说明网络环境、影响开播的系统环境和电脑性能，不代表平台账号审核、流量或开播权限结果。"
 from client_v2.product import APP_VERSION
 
 SITE_VERSION = APP_VERSION
@@ -257,6 +257,20 @@ footer .foot-links a:hover{color:var(--blue)}
     nav .btn{padding:10px 16px;font-size:13px}
 }
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* V2.1 unified light design system — matches the Windows client and admin. */
+:root{--bg:#f0f2f7;--panel:#fff;--panel-2:#fff;--line:#e5e7eb;--line-soft:#edf0f4;--text:#111827;--muted:#6b7280;--dim:#9ca3af;--blue:#2563eb;--cyan:#2563eb;--gold:#f59e0b;--green:#10b981;--shadow:0 18px 50px -28px #1e3a8a55}
+body{background:var(--bg);color:var(--text)}.gridbg,body:after{display:none}
+nav{background:#ffffffeb;border-color:var(--line);box-shadow:0 1px 0 #e5e7eb}nav .brand{color:var(--text)}.nav-links{color:var(--muted)}.nav-links a:hover{color:var(--blue)}
+.btn{border-radius:8px}.btn-primary{color:#fff;background:var(--blue);box-shadow:0 10px 24px -12px #2563ebaa}.btn-primary:hover{background:#1d4ed8}.btn-ghost{color:var(--text);background:#fff;border-color:var(--line)}
+.hero{padding-top:82px}.eyebrow{color:var(--blue);background:#eff6ff;border-color:#bfdbfe}h1 em{background:none;color:var(--blue)}
+.core{min-height:350px}.orbit{border-color:#bfdbfe}.o2{border-color:#dbeafe}.chip{background:#fff;border-color:#bfdbfe;border-radius:50%;box-shadow:0 0 0 28px #eff6ff,0 20px 50px -25px #1e3a8a55;color:var(--text)}.chip small{color:var(--blue)}
+.trust-inner,.tier,.mode,.cap,.report,.release,details{background:#fff;border-color:var(--line);box-shadow:0 8px 28px -24px #11182755}.trust-cell{border-color:var(--line);color:var(--muted)}.trust-cell b{color:var(--text)}
+.tier.featured{background:linear-gradient(145deg,#fff,#eff6ff);border-color:#bfdbfe;box-shadow:0 18px 50px -30px #2563eb66}.tier.featured .badge{color:#fff;background:var(--blue)}.tier .price{color:var(--text)}
+.mode:after{display:none}.mode.gold strong{color:var(--blue)}.cap span{color:#dbeafe}.caps{grid-template-columns:repeat(3,1fr)}
+.flow li{background:#fff;border-color:var(--line);border-top-color:var(--blue)}.metric{background:#f8fafc;border-color:var(--line)}.release{background:linear-gradient(120deg,#fff,#eff6ff)}
+details[open]{border-color:#bfdbfe}footer{border-color:var(--line)}
+@media(max-width:960px){.caps{grid-template-columns:1fr}}
 """
 
 
@@ -267,20 +281,13 @@ def render_home(settings: dict[str, str], release: Release | None) -> str:
     subtitle = _safe_text(settings.get("home_hero_subtitle"), "让每一次 TikTok 电脑直播，从技术准备充分开始。")
     intro = _safe_text(settings.get("product_intro"), "面向 TikTok / 跨境电脑直播公司和工作室的开播前技术准备度检测工具。")
 
-    default_features = [
-        "IP 与目标地区", "网络质量与真实测速", "Windows 直播环境",
-        "电脑性能与后台占用", "GPU 与硬件编码器",
-        "直播设备与插件", "直播软件与客户端完整性",
-    ]
-    features = _lines(settings.get("product_features", ""), default_features)
-    if len(features) != 7:
-        features = default_features
+    features = ["网络环境报告与建议", "影响开播的系统环境", "电脑性能说明与建议"]
     steps = _lines(settings.get("home_steps", ""),
                    ["发现真实问题", "判断问题来源", "安全处理或给出方案", "自动复检", "判断能否开播"])
 
     default_faq = (
-        "为什么每天开播前都要检查？\n提前发现网络波动、设备占用、编码异常和系统配置变化。\n"
-        "检测通过是否代表平台一定允许开播？\n不是，本工具只判断电脑、网络、设备和直播软件的技术准备情况。\n"
+        "为什么每天开播前都要检查？\n提前发现网络波动、系统配置变化和性能压力。\n"
+        "检测通过是否代表平台一定允许开播？\n不是，本工具只说明网络、系统环境和电脑性能。\n"
         "软件收费吗？\n开播检测服务免费使用，具体使用说明请在客户端内查看。"
     )
     faq_raw = _safe_text(settings.get("product_faq"), default_faq)
@@ -314,7 +321,7 @@ def render_home(settings: dict[str, str], release: Release | None) -> str:
     trust_cells = (
         ("01", "完全免费"),
         ("02", "真实网络采样"),
-        ("03", "七组开播检查"),
+        ("03", "三类环境报告"),
         ("04", "不读取账号数据"),
     )
     trust_html = "".join(
@@ -326,10 +333,10 @@ def render_home(settings: dict[str, str], release: Release | None) -> str:
     <span class='badge'>免费检测</span>
     <span class='tag'>FREE · 开播前体检</span>
     <div class='price'>免费<small> · 注册即用</small></div>
-    <p class='desc'>下载安装客户端，检查电脑环境、网络质量和直播配置。</p>
+    <p class='desc'>下载安装客户端，检查网络环境、系统环境和电脑性能。</p>
     <ul>
-        <li>完整 7 组开播检查</li>
-        <li>一键配置环境</li>
+        <li>三类开播前检测报告</li>
+        <li>系统环境一键修复</li>
         <li>历史报告同步与对比</li>
     </ul>
 </article>
@@ -339,7 +346,7 @@ def render_home(settings: dict[str, str], release: Release | None) -> str:
     <p class='desc'>检测异常会说明实际影响，并给出修复、复测或线路建议。</p>
     <ul>
         <li>网络问题给出专业建议</li>
-        <li>电脑环境支持一键配置</li>
+        <li>系统环境支持一键修复</li>
         <li>硬件问题生成参考报告</li>
     </ul>
 </article>
@@ -355,8 +362,8 @@ def render_home(settings: dict[str, str], release: Release | None) -> str:
 <nav><div class='inner'>
     <a class='brand' href='/'><img src='/assets/logo.png' width='38' height='38' alt='VD Logo'>{esc(name)}</a>
     <div class='nav-links'>
-        <a href='#tiers'>免费检测</a>
-        <a href='#modes'>核心能力</a>
+        <a href='#tiers'>产品介绍</a>
+        <a href='#modes'>检测流程</a>
         <a href='#faq'>常见问题</a>
         <a class='{dl_cls}' href='{dl_href}'>下载 V{esc(version)}</a>
     </div>
@@ -384,28 +391,28 @@ def render_home(settings: dict[str, str], release: Release | None) -> str:
 
 <section class='block' id='tiers'>
     <div class='section-head'>
-        <div><span class='eyebrow'>FREE CHECK</span><h2>免费的开播前技术体检</h2></div>
-        <p>先把电脑环境和网络情况检查清楚，再决定如何处理。</p>
+        <div><span class='eyebrow'>PREFLIGHT CHECK</span><h2>开播前先把环境检查清楚</h2></div>
+        <p>网络和性能异常给出建议，只有明确的系统环境问题需要修复。</p>
     </div>
     <div class='tiers'>{tiers_html}</div>
 </section>
 
 <section class='block' id='modes'>
     <div class='section-head'>
-        <div><span class='eyebrow'>DUAL MODE</span><h2>两种模式，只解决开播前的实际问题</h2></div>
-        <p>日常检查保持只读；环境配置需要确认后执行。产品不读取账号密码、Cookie 或个人文件。</p>
+        <div><span class='eyebrow'>SIMPLE FLOW</span><h2>检测、修复、复检，一条清晰流程</h2></div>
+        <p>产品不读取 TikTok 账号密码、Cookie、个人文件或直播素材。</p>
     </div>
     <div class='modes'>
-        <article class='mode'><strong>DAILY PREFLIGHT</strong><h3>一键开播检查</h3>
-            <p>{esc(settings.get('home_daily_text', '每天开播前跑一次，检出网络、编码、设备、系统的真实状况。'))}</p></article>
-        <article class='mode gold'><strong>ENVIRONMENT SETUP</strong><h3>一键配置环境</h3>
-            <p>{esc(settings.get('home_setup_text', '首次接入或换电脑后使用，一次性把 Windows 直播环境配到位。'))}</p></article>
+        <article class='mode'><strong>01 · CHECK</strong><h3>选择地区并开始检测</h3>
+            <p>依次检查网络环境、影响开播的系统环境和电脑性能。</p></article>
+        <article class='mode gold'><strong>02 · REPAIR</strong><h3>必要时一键修复</h3>
+            <p>系统环境修复后自动复检；通过后可直接启动 TikTok LIVE Studio。</p></article>
     </div>
 </section>
 
 <section class='block'>
     <div class='section-head'>
-        <div><span class='eyebrow'>REAL CHECKS</span><h2>七组真实检查，不靠一句笼统结论</h2></div>
+        <div><span class='eyebrow'>THREE REPORTS</span><h2>三份清晰报告，不靠一句笼统结论</h2></div>
         <p>每个异常都给出检测值、证据、问题定位、不处理的影响、解决步骤与复检入口。</p>
     </div>
     <div class='caps'>{feature_html}</div>
@@ -425,7 +432,7 @@ def render_home(settings: dict[str, str], release: Release | None) -> str:
     <div class='report'>
         <div class='metric'><span>稳定上传</span><b>真实采样</b></div>
         <div class='metric'><span>目标地区延迟</span><b>多节点</b></div>
-        <div class='metric'><span>编码与设备</span><b>本机读取</b></div>
+        <div class='metric'><span>电脑性能</span><b>本机读取</b></div>
         <div class='metric'><span>技术准备度</span><b class='good'>明确分级</b></div>
     </div>
 </section>
