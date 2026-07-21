@@ -295,8 +295,8 @@ def render_home(settings: dict[str, str], release: Release | None) -> str:
         faq_raw = default_faq
     faq = _lines(faq_raw, [])
 
-    version = release.version if release else "尚未发布"
-    size = f"{release.file_size / 1048576:.1f} MB" if release and release.file_size else "--"
+    version = release.version if release else SITE_VERSION
+    size = f"{release.file_size / 1048576:.1f} MB" if release and release.file_size else "准备中"
     date = (release.created_at or "")[:10] if release else "--"
     dl_cls = "btn btn-primary" if release else "btn btn-primary disabled"
     dl_href = "/download/latest" if release else "#unavailable"

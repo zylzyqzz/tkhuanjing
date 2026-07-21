@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from client_v2.models import CheckReport, CheckResult, Status
+from client_v2.product import APP_VERSION
 from client_v2.storage import baseline_delta
 from client_v2.ui.tokens import ACCENT, BG_APP
 
@@ -11,7 +12,7 @@ def test_home_has_no_fake_download_and_unknown_pages_are_branded(tmp_path):
     with build_client(tmp_path) as client:
         home = client.get("/")
         assert home.status_code == 200
-        assert "开播前" in home.text and "/api/v1/client/update" not in home.text
+        assert "开播前" in home.text and f"V{APP_VERSION}" in home.text and "/api/v1/client/update" not in home.text
         assert client.get("/download/latest").status_code == 503
         legacy = client.get("/download/", follow_redirects=False)
         assert legacy.status_code == 308 and legacy.headers["location"] == "/"
