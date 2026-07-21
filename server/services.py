@@ -99,8 +99,13 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def normalize_pem(value: str) -> str:
+    """Accept PEM values stored directly or with escaped newlines in environment files."""
+    return value.replace("\\n", "\n").strip()
+
+
 def sign_manifest(manifest: dict) -> str:
-    key_text = get_settings().update_private_key.strip()
+    key_text = normalize_pem(get_settings().update_private_key)
     if not key_text:
         return ""
     key = serialization.load_pem_private_key(key_text.encode(), password=None)
@@ -135,5 +140,5 @@ def release_manifest(db: Session, channel: str = "stable") -> dict:
         "url": f"{settings.public_base.rstrip('/')}/downloads/{filename}",
     }
     core["signature"] = release.signature or sign_manifest(core)
-    core["public_key"] = settings.update_public_key
+    core["public_key"] = normalize_pem(settings.update_public_key)
     return core

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import base64
 import importlib
+import json
 import os
 from pathlib import Path
 import sys
 import uuid
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi.testclient import TestClient
 
 
@@ -179,6 +183,47 @@ def test_paid_activation_release_manifest_and_update_compatibility(tmp_path):
         rolled_back = client.post("/tk-api/release/activate", headers=admin_headers, json={"version": "2.2.0"})
         assert rolled_back.status_code == 200
         assert client.get("/api/v1/client/update").json()["version"] == "2.2.0"
+
+
+def test_release_manifest_accepts_environment_escaped_pem_keys(tmp_path):
+    private_key = Ed25519PrivateKey.generate()
+    private_pem = private_key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    ).decode()
+    public_pem = private_key.public_key().public_bytes(
+        serialization.Encoding.PEM,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode()
+    os.environ["TK_UPDATE_PRIVATE_KEY"] = private_pem.replace("\n", "\\n")
+    os.environ["TK_UPDATE_PUBLIC_KEY"] = public_pem.replace("\n", "\\n")
+    try:
+        with build_client(tmp_path) as client:
+            csrf = admin_login(client)
+            installer = b"MZ" + b"escaped-pem-installer" * 50
+            published = client.post(
+                "/tk-api/release",
+                headers={"X-CSRF-Token": csrf},
+                data={"version": "2.1.0-preview", "title": "预览版", "details": "转义 PEM 测试"},
+                files={"file": ("setup.exe", installer, "application/octet-stream")},
+            )
+            assert published.status_code == 200
+            assert client.post(
+                "/tk-api/release/activate",
+                headers={"X-CSRF-Token": csrf},
+                json={"version": "2.1.0-preview"},
+            ).status_code == 200
+            manifest = client.get("/api/v1/client/update").json()
+            assert manifest["public_key"] == public_pem.strip()
+            assert "\\n" not in manifest["public_key"]
+            signature = base64.b64decode(manifest["signature"])
+            signed_fields = {key: value for key, value in manifest.items() if key not in {"signature", "public_key"}}
+            payload = json.dumps(signed_fields, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+            private_key.public_key().verify(signature, payload)
+    finally:
+        os.environ.pop("TK_UPDATE_PRIVATE_KEY", None)
+        os.environ.pop("TK_UPDATE_PUBLIC_KEY", None)
 
 
 def test_time_plan_authorization_is_unlimited_with_expiry(tmp_path):
