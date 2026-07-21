@@ -39,6 +39,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validate code-signing configuration
+        shell: pwsh
+        env:
+          CODE_SIGNING_PFX_BASE64: ${{ secrets.CODE_SIGNING_PFX_BASE64 }}
+          CODE_SIGNING_PFX_PASSWORD: ${{ secrets.CODE_SIGNING_PFX_PASSWORD }}
+        run: |
+          if (-not $env:CODE_SIGNING_PFX_BASE64 -or -not $env:CODE_SIGNING_PFX_PASSWORD) {
+            throw "Code-signing secrets are required. See docs/WINDOWS_CODE_SIGNING.md."
+          }
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -92,12 +102,17 @@ jobs:
           CODE_SIGNING_PFX_BASE64: ${{ secrets.CODE_SIGNING_PFX_BASE64 }}
           CODE_SIGNING_PFX_PASSWORD: ${{ secrets.CODE_SIGNING_PFX_PASSWORD }}
         run: |
-          if (-not $env:CODE_SIGNING_PFX_BASE64 -or -not $env:CODE_SIGNING_PFX_PASSWORD) { throw "Code-signing secrets are required" }
           $pfx = Join-Path $env:RUNNER_TEMP "vd-nexus-signing.pfx"
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CODE_SIGNING_PFX_BASE64))
-          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password (ConvertTo-SecureString $env:CODE_SIGNING_PFX_PASSWORD -AsPlainText -Force)
-          .\scripts\sign-release.ps1 -CertificateThumbprint $cert.Thumbprint
-          Remove-Item $pfx -Force
+          try {
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CODE_SIGNING_PFX_BASE64))
+            $password = ConvertTo-SecureString $env:CODE_SIGNING_PFX_PASSWORD -AsPlainText -Force
+            $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+            if (-not $cert.HasPrivateKey) { throw "The code-signing certificate has no private key" }
+            .\scripts\sign-release.ps1 -CertificateThumbprint $cert.Thumbprint
+          }
+          finally {
+            Remove-Item $pfx -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Create checksums
         shell: pwsh
