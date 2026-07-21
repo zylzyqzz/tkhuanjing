@@ -138,6 +138,13 @@ def save_credentials(**values: str) -> None:
     store = CredentialStore(CREDENTIAL_FILE); current = store.load(); current.update({k: v for k, v in values.items() if v}); store.save(current)
 
 
+def clear_credentials(*keys: str) -> None:
+    from .credentials import CredentialStore
+    store = CredentialStore(CREDENTIAL_FILE)
+    for key in keys:
+        store.clear(key)
+
+
 def load_license() -> dict:
     return load_json(LICENSE_FILE, {"schema_version": 4, "tier": "FREE", "credits": -1, "status": "active", "expires_at": "", "lease_until": "", "pending_events": []})
 

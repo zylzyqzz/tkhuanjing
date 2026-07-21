@@ -6,7 +6,11 @@ from .product import APP_VERSION
 
 
 class ApiError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, code: str = "", status_code: int = 0, request_id: str = ""):
+        super().__init__(message)
+        self.code = code
+        self.status_code = status_code
+        self.request_id = request_id
 
 
 class ClientApi:
@@ -26,11 +30,17 @@ class ClientApi:
                 body = response.json()
                 error = body.get("error", {}) if isinstance(body, dict) else {}
                 message = error.get("message") if isinstance(error, dict) else body.get("detail")
+                code = error.get("code", "") if isinstance(error, dict) else ""
                 request_id = error.get("request_id", "") if isinstance(error, dict) else ""
-                raise ApiError((message or f"服务返回 {response.status_code}") + (f" [{request_id[:8]}]" if request_id else ""))
+                raise ApiError(
+                    (message or f"服务返回 {response.status_code}") + (f" [{request_id[:8]}]" if request_id else ""),
+                    code=code,
+                    status_code=response.status_code,
+                    request_id=request_id,
+                )
             return response.json()
         except (httpx.HTTPError, ValueError) as exc:
-            raise ApiError(f"无法连接服务：{exc}") from exc
+            raise ApiError(f"无法连接服务：{exc}", code="NETWORK_ERROR") from exc
 
     def register(self, config: dict, version: str) -> dict:
         data = self.request("POST", "/api/v1/client/register", json={
