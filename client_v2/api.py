@@ -62,8 +62,8 @@ class ClientApi:
     def upload_events(self, events: list[dict]) -> dict:
         return self.request("POST", "/api/v1/client/events", json={"events": events})
 
-    def enterprise_login(self, username: str, password: str) -> dict:
-        return self.request("POST", "/api/v2/auth/login", json={"username": username, "password": password}, use_token=False)
+    def enterprise_login(self, organization_code: str, username: str, password: str) -> dict:
+        return self.request("POST", "/api/v2/auth/login", json={"organization_code": organization_code, "username": username, "password": password}, use_token=False)
 
     def enterprise_options(self, member_token: str) -> dict:
         return self.request("GET", "/api/v2/organization/options", headers={"Authorization": f"Bearer {member_token}"}, use_token=False)
@@ -84,6 +84,9 @@ class ClientApi:
 
     def v2_device_config(self) -> dict:
         return self.request("GET", "/api/v2/device/config", headers={"X-Device-Token": self.token}, use_token=False)
+
+    def v2_device_bootstrap(self) -> dict:
+        return self.request("GET", "/api/v2/device/bootstrap", headers={"X-Device-Token": self.token}, use_token=False)
 
     def update_info(self) -> dict:
         return self.request("GET", "/api/v1/client/update")

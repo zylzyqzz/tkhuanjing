@@ -91,34 +91,39 @@ class UpdateWorker(QObject):
 
 
 class AppWindow(QWidget):
+    bootstrap_updated = Signal(dict)
     def __init__(self):
         super().__init__(); self.config = load_config(); self.report: CheckReport | None = None; self.thread: QThread | None = None; self.worker = None; self.repair_events = []; self.machine=StateMachine(ClientState.IDLE); self.update_thread=None; self.update_worker=None; self._heartbeat_running=False; self._v2_heartbeat_running=False; self._last_studio_state="unknown"
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window); self.setAttribute(Qt.WA_TranslucentBackground); self.setFixedSize(WINDOW_W, WINDOW_H); self.setStyleSheet(APP_STYLESHEET)
         root = QVBoxLayout(self); root.setContentsMargins(0,0,0,0); chrome = QWidget(); chrome.setObjectName("chrome"); root.addWidget(chrome); shell = QVBoxLayout(chrome); shell.setContentsMargins(0,0,0,0); shell.setSpacing(0); shell.addWidget(TitleBar(self))
         middle = QHBoxLayout(); middle.setContentsMargins(0,0,0,0); middle.setSpacing(0); self.sidebar = Sidebar(); self.sidebar.selected.connect(self._navigate); middle.addWidget(self.sidebar)
         self.stack = QStackedWidget(); self.stack.setObjectName("content"); middle.addWidget(self.stack,1); shell.addLayout(middle,1)
-        self.home = HomeScreen(self.config.get("target_region_id", "")); self.scan = ScanScreen(); self.result = ResultScreen(); self.settings = self._settings_page(); self.about = self._about_page()
-        for page in (self.home,self.scan,self.result,self.settings,self.about): self.stack.addWidget(page)
+        self.home = HomeScreen(self.config.get("target_region_id", "")); self.scan = ScanScreen(); self.result = ResultScreen(); self.room_page = self._current_room_page(); self.settings = self._settings_page(); self.about = self._about_page()
+        for page in (self.home,self.scan,self.result,self.room_page,self.settings,self.about): self.stack.addWidget(page)
         self.home.start_button.clicked.connect(self.start_check); self.scan.cancel_requested.connect(self.cancel); self.result.recheck_requested.connect(self.start_check); self.result.repair_requested.connect(self.start_repair); self.result.launch_requested.connect(self.launch); self.result.export_requested.connect(self.export_report); self.result.upload_requested.connect(self.upload_report); self.result.history_requested.connect(self.open_history)
         history = load_reports(1)
         if history: self.home.last_result.setText(f"上次检测：{history[0].get('conclusion','已完成')}")
         QTimer.singleShot(2500,self._retry_upload_queue)
         self.heartbeat_timer=QTimer(self); self.heartbeat_timer.setInterval(30000); self.heartbeat_timer.timeout.connect(self._heartbeat); self.heartbeat_timer.start(); QTimer.singleShot(3500,self._heartbeat)
         self.v2_heartbeat_timer=QTimer(self); self.v2_heartbeat_timer.setInterval(20000); self.v2_heartbeat_timer.timeout.connect(self._v2_heartbeat); self.v2_heartbeat_timer.start(); QTimer.singleShot(5000,self._v2_heartbeat)
+        self.bootstrap_updated.connect(self._apply_device_bootstrap)
+
+    def _current_room_page(self):
+        page=QWidget();layout=QVBoxLayout(page);layout.setContentsMargins(40,30,40,30);title=QLabel("当前直播间");title.setProperty("title",True);layout.addWidget(title);hint=QLabel("查看这台电脑所属的企业、直播间、TikTok 账号和主播。");hint.setProperty("muted",True);layout.addWidget(hint);card=QFrame();card.setProperty("card",True);box=QVBoxLayout(card);self.room_status=QLabel("正在同步当前绑定……");self.room_status.setWordWrap(True);box.addWidget(self.room_status);open_button=QPushButton("设置或更换当前直播间");open_button.setProperty("primary",True);open_button.clicked.connect(self._open_enterprise_binding);box.addWidget(open_button);impact=QLabel("更换绑定只影响之后的新数据，历史检测和直播数据不会修改。");impact.setProperty("muted",True);impact.setWordWrap(True);box.addWidget(impact);layout.addWidget(card);layout.addStretch();return page
 
     def _settings_page(self):
-        page = QWidget(); layout = QVBoxLayout(page); layout.setContentsMargins(40,24,40,24); title = QLabel("设置"); title.setProperty("title",True); layout.addWidget(title)
+        page = QWidget(); layout = QVBoxLayout(page); layout.setContentsMargins(40,24,40,24); title = QLabel("帮助与诊断"); title.setProperty("title",True); layout.addWidget(title)
         account=QFrame(); account.setProperty("card",True); account_form=QFormLayout(account); user=load_user(); self.account_status=QLabel("已登录" if user.get("logged_in") else "未登录"); account_form.addRow("账号状态",self.account_status); login=QPushButton("打开账号中心"); login.clicked.connect(self._open_account); account_form.addRow("",login); layout.addWidget(account)
-        card=QFrame(); card.setProperty("card",True); form=QFormLayout(card); self.live_path=QLineEdit(self.config.get("live_studio_path","")); form.addRow("TikTok LIVE Studio 路径",self.live_path); find=QPushButton("自动查找"); find.clicked.connect(self._find_live); form.addRow("",find); enterprise=QPushButton("企业、直播间、账号与主播绑定"); enterprise.clicked.connect(self._open_enterprise_binding); form.addRow("企业运营",enterprise); self.enterprise_code=QLineEdit(); self.enterprise_code.setPlaceholderText("旧版6位设备绑定码（兼容）"); form.addRow("旧版绑定",self.enterprise_code); bind=QPushButton("兼容绑定"); bind.clicked.connect(self._bind_enterprise); form.addRow("",bind); update=QPushButton("检查软件更新"); update.clicked.connect(self.check_update); form.addRow("",update); save=QPushButton("保存设置"); save.setProperty("primary",True); save.clicked.connect(self._save_settings); form.addRow("",save); layout.addWidget(card); layout.addStretch(); return page
+        card=QFrame(); card.setProperty("card",True); form=QFormLayout(card); self.live_path=QLineEdit(self.config.get("live_studio_path","")); form.addRow("TikTok LIVE Studio 路径",self.live_path); find=QPushButton("自动查找"); find.clicked.connect(self._find_live); form.addRow("",find); self.enterprise_code=QLineEdit(); self.enterprise_code.setPlaceholderText("旧版6位设备绑定码（兼容）"); form.addRow("旧版设备接入",self.enterprise_code); bind=QPushButton("兼容绑定"); bind.clicked.connect(self._bind_enterprise); form.addRow("",bind); update=QPushButton("检查软件更新"); update.clicked.connect(self.check_update); form.addRow("",update); save=QPushButton("保存诊断设置"); save.setProperty("primary",True); save.clicked.connect(self._save_settings); form.addRow("",save); layout.addWidget(card); layout.addStretch(); return page
 
     def _about_page(self):
         page=QWidget(); layout=QVBoxLayout(page); layout.setContentsMargins(40,32,40,32); title=QLabel("关于 VD Nexus"); title.setProperty("title",True); layout.addWidget(title); card=QFrame(); card.setProperty("card",True); box=QVBoxLayout(card); text=QLabel(f"VD开播助手 V{APP_VERSION}\n\n面向 TikTok 直播的网络环境、系统环境和电脑性能检测工具。\n\n不读取账号密码、Cookie、个人文件或直播素材；缓存清理仅处理白名单临时目录。"); text.setWordWrap(True); box.addWidget(text); layout.addWidget(card); layout.addStretch(); return page
 
     def _navigate(self, page: str):
         if page == "home": self.stack.setCurrentWidget(self.home)
-        elif page == "report": self.stack.setCurrentWidget(self.result)
-        elif page == "settings": self.stack.setCurrentWidget(self.settings)
-        else: self.stack.setCurrentWidget(self.about)
+        elif page == "room": self.stack.setCurrentWidget(self.room_page)
+        elif page == "device": self.stack.setCurrentWidget(self.result)
+        else: self.stack.setCurrentWidget(self.settings)
 
     def start_check(self):
         if self.machine.busy or (self.thread and self.thread.isRunning()): return
@@ -159,7 +164,7 @@ class AppWindow(QWidget):
             return
         self._run_worker(CheckWorker(self.config, True), self._check_done)
 
-    def _show_result(self): self.stack.setCurrentWidget(self.result); self.sidebar.select("report")
+    def _show_result(self): self.stack.setCurrentWidget(self.result); self.sidebar.select("device")
     def _failed(self,message):
         cancelled="已取消" in message; self.machine.transition(ClientState.CANCELLED if cancelled else ClientState.FAILED); self._apply_state(); self._send_event("check_failed", "warning", {"message": message[:300]}) if not cancelled else None; QMessageBox.information(self,"已取消",message) if cancelled else QMessageBox.critical(self,"操作未完成",message); self.stack.setCurrentWidget(self.home)
     def cancel(self):
@@ -223,7 +228,7 @@ class AppWindow(QWidget):
             result=api.bind_enterprise(code); self.enterprise_code.clear(); QMessageBox.information(self,"绑定成功",f"已加入企业：{result['tenant']['name']}"); self._heartbeat()
         except Exception as exc: QMessageBox.warning(self,"绑定失败",normalize_error(exc).display())
 
-    def _open_enterprise_binding(self): EnterpriseBindingDialog(self).exec()
+    def _open_enterprise_binding(self): EnterpriseBindingDialog(self).exec(); self._v2_heartbeat()
 
     def _v2_heartbeat(self):
         if self._v2_heartbeat_running: return
@@ -231,9 +236,18 @@ class AppWindow(QWidget):
         threading.Thread(target=self._flush_v2_safely,daemon=True,name="v2-device-heartbeat").start()
 
     def _flush_v2_safely(self):
-        try: flush_v2_heartbeat()
+        try:
+            result=flush_v2_heartbeat();bootstrap=result.get("bootstrap",{})
+            if bootstrap:self.bootstrap_updated.emit(bootstrap)
         except Exception: pass
         finally: self._v2_heartbeat_running=False
+
+    @Slot(dict)
+    def _apply_device_bootstrap(self,bootstrap):
+        config=bootstrap.get("config",{});interval=max(10,int(config.get("heartbeat_interval_seconds",20)));self.v2_heartbeat_timer.setInterval(interval*1000);self.sidebar.apply_features(bootstrap.get("features",{}));binding=bootstrap.get("binding");organization=bootstrap.get("organization",{})
+        self.room_status.setText(f"企业：{organization.get('name','-')}\n当前直播间已绑定，状态将在 {interval} 秒内同步。" if binding else f"企业：{organization.get('name','-')}\n这台电脑尚未选择直播间。")
+        minimum=bootstrap.get("minimum_version","")
+        if minimum and tuple(int(x) for x in minimum.split('.')[:3])>tuple(int(x) for x in APP_VERSION.split('.')[:3]):self.room_status.setText(self.room_status.text()+f"\n客户端需要升级到 V{minimum} 或更高版本。")
 
     def _presence_payload(self):
         state_map={ClientState.CHECKING:"checking",ClientState.REPAIRING:"repairing",ClientState.RECHECKING:"rechecking",ClientState.READY:"ready",ClientState.NEEDS_REPAIR:"risk",ClientState.FAILED:"failed"}

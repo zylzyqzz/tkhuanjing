@@ -1,38 +1,65 @@
 from __future__ import annotations
+
 from PySide6.QtWidgets import QComboBox,QDialog,QFormLayout,QLabel,QLineEdit,QMessageBox,QPushButton,QVBoxLayout
+
 from ..api import ClientApi
 from ..product import APP_VERSION
 from ..storage import load_config,load_credentials,save_credentials
 
+
 class EnterpriseBindingDialog(QDialog):
- def __init__(self,parent=None):
-  super().__init__(parent);self.setWindowTitle("企业与直播间绑定");self.setMinimumWidth(460);self.config=load_config();self.credentials=load_credentials();self.api=ClientApi(self.config["api_base"],self.credentials.get("device_token",""));self.options={}
-  root=QVBoxLayout(self);self.status=QLabel("请先登录企业成员账号");self.status.setWordWrap(True);root.addWidget(self.status);form=QFormLayout();root.addLayout(form)
-  self.username=QLineEdit();self.password=QLineEdit();self.password.setEchoMode(QLineEdit.Password);form.addRow("企业账号",self.username);form.addRow("登录密码",self.password)
-  login=QPushButton("登录并同步可绑定资源");login.clicked.connect(self.login);form.addRow("",login)
-  self.room=QComboBox();self.account=QComboBox();self.anchor=QComboBox();form.addRow("直播间",self.room);form.addRow("TikTok 账号",self.account);form.addRow("主播",self.anchor)
-  bind=QPushButton("确认绑定");bind.setProperty("primary",True);bind.clicked.connect(self.bind);form.addRow("",bind);self.refresh_current()
- def ensure_device(self):
-  if not self.api.token:
-   x=self.api.register(self.config,APP_VERSION);save_credentials(device_token=x["device_token"]);self.api.token=x["device_token"]
- def refresh_current(self):
-  try:
-   self.ensure_device();x=self.api.v2_binding();b=x.get("binding");self.status.setText(f"当前绑定：直播间 #{b['room_id']} · 最后同步 {x.get('synced_at','')}" if b else "当前设备尚未绑定企业直播间")
-  except Exception:self.status.setText("当前绑定状态暂时无法同步")
- def login(self):
-  try:
-   x=self.api.enterprise_login(self.username.text().strip(),self.password.text());token=x["token"];save_credentials(organization_member_token=token);self.options=self.api.enterprise_options(token)
-   self.room.clear();self.account.clear();self.anchor.clear()
-   for row in self.options["rooms"]:self.room.addItem(row["name"],row["id"])
-   self.account.addItem("不关联账号",None)
-   for row in self.options["accounts"]:self.account.addItem(row["display_name"],row["id"])
-   self.anchor.addItem("不关联主播",None)
-   for row in self.options["anchors"]:self.anchor.addItem(row["display_name"],row["id"])
-   self.status.setText(f"已登录：{self.options['organization']['name']}")
-  except Exception as exc:QMessageBox.warning(self,"企业登录失败",str(exc))
- def bind(self):
-  token=load_credentials().get("organization_member_token","")
-  if not token or self.room.currentData() is None:QMessageBox.warning(self,"无法绑定","请先登录并选择直播间");return
-  try:
-   x=self.api.v2_bind(token,{"room_id":self.room.currentData(),"account_id":self.account.currentData(),"anchor_id":self.anchor.currentData(),"binding_type":"primary","reason":"客户端绑定"});save_credentials(v2_binding_id=str(x["binding"]["id"]));self.status.setText(f"绑定成功：直播间 #{x['binding']['room_id']}");QMessageBox.information(self,"绑定完成","企业、直播间、账号和主播已同步。")
-  except Exception as exc:QMessageBox.warning(self,"绑定冲突或失败",str(exc))
+    def __init__(self,parent=None):
+        super().__init__(parent);self.setWindowTitle("当前直播间");self.setMinimumWidth(500);self.config=load_config();self.credentials=load_credentials();self.api=ClientApi(self.config["api_base"],self.credentials.get("device_token",""));self.options={};self.current_binding=None
+        root=QVBoxLayout(self);title=QLabel("将这台电脑加入企业直播间");title.setProperty("title",True);root.addWidget(title);self.status=QLabel("正在识别本机和当前绑定……");self.status.setWordWrap(True);root.addWidget(self.status);form=QFormLayout();root.addLayout(form)
+        self.organization_code=QLineEdit(self.credentials.get("organization_code",""));self.organization_code.setPlaceholderText("例如 ACME-US")
+        self.username=QLineEdit(self.credentials.get("organization_username",""));self.password=QLineEdit();self.password.setEchoMode(QLineEdit.Password)
+        form.addRow("企业代码",self.organization_code);form.addRow("企业账号",self.username);form.addRow("登录密码",self.password)
+        login=QPushButton("登录并获取企业配置");login.clicked.connect(self.login);form.addRow("",login)
+        self.room=QComboBox();self.account=QComboBox();self.anchor=QComboBox();self.room.currentIndexChanged.connect(self._filter_accounts);form.addRow("目标直播间",self.room);form.addRow("TikTok 账号",self.account);form.addRow("主播",self.anchor)
+        self.impact=QLabel("更换后，新的检测和直播数据归属目标直播间；历史数据不会修改。");self.impact.setWordWrap(True);self.impact.setProperty("muted",True);root.addWidget(self.impact)
+        bind=QPushButton("确认绑定");bind.setProperty("primary",True);bind.clicked.connect(self.bind);form.addRow("",bind)
+        self.unbind_button=QPushButton("解除当前绑定");self.unbind_button.clicked.connect(self.unbind);self.unbind_button.setVisible(False);form.addRow("",self.unbind_button);self.refresh_current()
+
+    def ensure_device(self):
+        if not self.api.token:
+            value=self.api.register(self.config,APP_VERSION);save_credentials(device_token=value["device_token"]);self.api.token=value["device_token"]
+
+    def refresh_current(self):
+        try:
+            self.ensure_device();value=self.api.v2_binding();self.current_binding=value.get("binding");self.status.setText("这台电脑已经绑定直播间。登录后可查看详情或更换绑定。" if self.current_binding else "已识别这台电脑，当前尚未绑定企业直播间。");self.unbind_button.setVisible(bool(self.current_binding))
+        except Exception:self.status.setText("暂时无法同步当前绑定，请检查网络后重试。")
+
+    def login(self):
+        code=self.organization_code.text().strip();username=self.username.text().strip()
+        if not code:QMessageBox.warning(self,"需要企业代码","请输入企业管理员提供的企业代码。");return
+        try:
+            value=self.api.enterprise_login(code,username,self.password.text());token=value["token"];save_credentials(organization_member_token=token,organization_code=code,organization_username=username);self.options=self.api.enterprise_options(token)
+            self.room.clear();self.anchor.clear()
+            for row in self.options["rooms"]:self.room.addItem(row["name"],row["id"])
+            self.anchor.addItem("暂不关联主播",None)
+            for row in self.options["anchors"]:self.anchor.addItem(row["display_name"],row["id"])
+            self._filter_accounts();self.password.clear();self.status.setText(f"已登录 {self.options['organization']['name']}，请选择这台电脑负责的直播间。")
+        except Exception as exc:QMessageBox.warning(self,"企业登录失败",str(exc))
+
+    def _filter_accounts(self):
+        current=self.room.currentData();self.account.clear();self.account.addItem("暂不关联账号",None)
+        for row in self.options.get("accounts",[]):
+            if row.get("room_id") in {None,current}:self.account.addItem(row["display_name"],row["id"])
+
+    def bind(self):
+        token=load_credentials().get("organization_member_token","")
+        if not token or self.room.currentData() is None:QMessageBox.warning(self,"还不能绑定","请先登录并选择目标直播间。");return
+        room_name=self.room.currentText();account_name=self.account.currentText();anchor_name=self.anchor.currentText()
+        if self.current_binding:
+            message=f"目标绑定：\n{room_name} / {anchor_name} / {account_name}\n\n更换后，新的检测和直播数据归属目标直播间；历史数据不会修改。"
+            if QMessageBox.question(self,"确认更换直播间",message,QMessageBox.Yes|QMessageBox.No,QMessageBox.No)!=QMessageBox.Yes:return
+        try:
+            value=self.api.v2_bind(token,{"room_id":self.room.currentData(),"account_id":self.account.currentData(),"anchor_id":self.anchor.currentData(),"binding_type":"primary","reason":"客户端确认换绑" if self.current_binding else "客户端首次绑定"});save_credentials(v2_binding_id=str(value["binding"]["id"]));self.current_binding=value["binding"];self.unbind_button.setVisible(True);self.status.setText(f"当前直播间：{room_name} / {anchor_name} / {account_name}");QMessageBox.information(self,"绑定完成",f"绑定成功。\n\n电脑：本机\n直播间：{room_name}\n主播：{anchor_name}\n账号：{account_name}\n\n客户端将在 20 秒内开始同步状态。")
+        except Exception as exc:QMessageBox.warning(self,"绑定未完成",f"{exc}\n\n请确认直播间没有绑定其他主电脑，然后重试。")
+
+    def unbind(self):
+        token=load_credentials().get("organization_member_token","")
+        if not token:return
+        if QMessageBox.warning(self,"确认解除绑定","解除后，这台电脑的新检测数据将不再归属当前直播间；历史数据不会删除。",QMessageBox.Yes|QMessageBox.No,QMessageBox.No)!=QMessageBox.Yes:return
+        try:self.api.v2_unbind(token,"客户端确认解绑");self.current_binding=None;self.unbind_button.setVisible(False);self.status.setText("已解除绑定。请重新选择直播间后完成绑定。");QMessageBox.information(self,"已解除绑定","当前绑定已解除，历史数据保持不变。")
+        except Exception as exc:QMessageBox.warning(self,"解除绑定失败",str(exc))

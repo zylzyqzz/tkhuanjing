@@ -17,7 +17,10 @@ def payload()->dict:
 def flush_once()->dict:
  config=load_config();credentials=load_credentials();token=credentials.get("device_token","")
  if not token:return {"sent":0,"queued":0}
- api=ClientApi(config["api_base"],token);current=payload();enqueue(current);sent=set();last={}
+ api=ClientApi(config["api_base"],token);bootstrap={}
+ try:bootstrap=api.v2_device_bootstrap()
+ except Exception:pass
+ runtime=bootstrap.get("config",{});current=payload();enqueue(current,int(runtime.get("queue_max_items",500)),int(runtime.get("queue_max_age_hours",24)));sent=set();last={}
  for item in pending():
   try:
    last=api.v2_heartbeat(item)
@@ -25,4 +28,6 @@ def flush_once()->dict:
    if any(command not in ALLOWED_COMMANDS for command in commands):raise RuntimeError("服务端返回了非白名单命令")
    sent.add(item["sent_at"])
   except Exception:break
- acknowledge(sent);return {"sent":len(sent),"queued":len(pending()),"response":last}
+ acknowledge(sent);result={"sent":len(sent),"queued":len(pending()),"response":last}
+ if bootstrap:result["bootstrap"]=bootstrap
+ return result

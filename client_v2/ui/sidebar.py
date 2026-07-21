@@ -12,10 +12,15 @@ class Sidebar(QFrame):
         layout = QVBoxLayout(self); layout.setContentsMargins(12,22,12,18); layout.setSpacing(8)
         brand = QLabel("VD NEXUS"); brand.setStyleSheet("color:white;font-size:17px;font-weight:800;padding:8px"); layout.addWidget(brand)
         self.group = QButtonGroup(self); self.group.setExclusive(True); self.buttons = {}
-        for key, icon, text in (("home","⌂","首页"),("report","≡","检测报告"),("settings","⚙","设置"),("about","ⓘ","关于")):
+        for key, icon, text in (("home","⌂","开播准备"),("room","◈","当前直播间"),("device","≡","设备状态"),("help","ⓘ","帮助与诊断")):
             button = QPushButton(f"{icon}   {text}"); button.setCheckable(True); button.setFixedHeight(44); button.setStyleSheet(f"QPushButton{{text-align:left;padding-left:14px;color:{SIDEBAR_TEXT};background:transparent;border:0}}QPushButton:hover{{background:{SIDEBAR_HOVER};color:white}}QPushButton:checked{{background:{SIDEBAR_ACTIVE};color:{SIDEBAR_TEXT_ON};font-weight:700}}")
             button.clicked.connect(lambda _=False, page=key: self.selected.emit(page)); self.group.addButton(button); self.buttons[key] = button; layout.addWidget(button)
         layout.addStretch(); note = QLabel("网络 · 系统 · 性能"); note.setStyleSheet(f"color:{SIDEBAR_TEXT};font-size:10px;padding:8px"); layout.addWidget(note); self.buttons["home"].setChecked(True)
 
     def select(self, page: str):
         if page in self.buttons: self.buttons[page].setChecked(True)
+
+    def apply_features(self, features: dict):
+        mapping={"home":"environment_check","room":"device_binding","device":"device_heartbeat"}
+        for key,feature in mapping.items():
+            if key in self.buttons:self.buttons[key].setVisible(bool(features.get(feature,True)))
