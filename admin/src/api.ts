@@ -2,6 +2,19 @@ import { reactive } from 'vue'
 
 export const session = reactive({loggedIn:false, username:'', role:'', tenantId:null as number|null, csrf:'', permissions:[] as string[], subscription:null as any, enterpriseToken:'',organizationCode:'',bootstrap:null as any,bootstrapLoading:false,bootstrapError:''})
 
+export function clearMemberSession(){
+  sessionStorage.removeItem('vd-member-token')
+  sessionStorage.removeItem('vd-member')
+  session.loggedIn=false
+  session.username=''
+  session.role=''
+  session.tenantId=null
+  session.permissions=[]
+  session.enterpriseToken=''
+  session.organizationCode=''
+  session.bootstrap=null
+}
+
 export async function api(path:string, options:RequestInit={}) {
   const headers=new Headers(options.headers||{})
   if(session.csrf&&options.method&&options.method!=='GET') headers.set('X-CSRF-Token',session.csrf)
@@ -9,7 +22,11 @@ export async function api(path:string, options:RequestInit={}) {
   if(options.body&&!(options.body instanceof FormData)) headers.set('Content-Type','application/json')
   const response=await fetch(path,{credentials:'same-origin',...options,headers})
   const body=await response.json().catch(()=>({}))
-  if(!response.ok) {const error:any=new Error(body.error?.message||body.detail||`请求失败 ${response.status}`);error.code=body.error?.code;error.details=body.error?.details;error.requestId=body.error?.request_id;error.status=response.status;throw error}
+  if(!response.ok) {
+    const code=body.error?.code
+    if(session.enterpriseToken&&response.status===401&&(code==='AUTH_INVALID'||code==='AUTH_EXPIRED'))clearMemberSession()
+    const error:any=new Error(body.error?.message||body.detail||`请求失败 ${response.status}`);error.code=code;error.details=body.error?.details;error.requestId=body.error?.request_id;error.status=response.status;throw error
+  }
   return body
 }
 
