@@ -13,5 +13,5 @@ export const cssVariables=Object.entries({
   '--color-bg':tokens.color.background,'--color-surface':tokens.color.surface,'--color-text':tokens.color.text,
   '--color-muted':tokens.color.muted,'--color-border':tokens.color.border,'--color-success':tokens.color.success,
   '--color-warning':tokens.color.warning,'--color-danger':tokens.color.danger,'--radius-card':tokens.radius.lg,
-  '--shadow-card':tokens.shadow.card,'--motion-normal':tokens.motion.normal
+  '--shadow-card':tokens.shadow.card,'--shadow-float':tokens.shadow.float,'--motion-normal':tokens.motion.normal
 }).map(([key,value])=>`${key}:${value}`).join(';')
