@@ -25,6 +25,8 @@ assets
 !assets/
 assets/*
 !assets/logo-web.png
+!assets/NotoSansSC-VF.ttf
+!assets/app_icon.ico
 *.exe
 *.sqlite3
 *.db
