@@ -107,12 +107,13 @@ async def shutdown() -> None:
 
 @app.middleware("http")
 async def request_context(request: Request, call_next):
-    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))[:80]
+    request_id = request.headers.get("X-Request-ID", f"req_{uuid.uuid4().hex}")[:80]
+    request.state.request_id = request_id
     try:
         response = await call_next(request)
     except Exception:
         logger.exception("unhandled request_id=%s path=%s", request_id, request.url.path)
-        response = JSONResponse(status_code=500, content={"error": {"code": "INTERNAL_ERROR", "message": "服务暂时不可用", "request_id": request_id}})
+        response = JSONResponse(status_code=500, content={"error": {"code": "INTERNAL_ERROR", "message": "服务暂时不可用", "details": {}, "request_id": request_id}})
     response.headers["X-Request-ID"] = request_id
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "same-origin"
@@ -122,17 +123,20 @@ async def request_context(request: Request, call_next):
 
 @app.exception_handler(HTTPException)
 async def http_error(request: Request, exc: HTTPException) -> JSONResponse:
-    request_id = request.headers.get("X-Request-ID", "")
+    request_id = getattr(request.state, "request_id", request.headers.get("X-Request-ID", ""))
     if isinstance(exc.detail, dict):
         error = {"code": exc.detail.get("code", f"HTTP_{exc.status_code}"), "message": exc.detail.get("message", "请求未完成"), "details": exc.detail.get("details", {}), "request_id": request_id}
     else:
-        error = {"code": f"HTTP_{exc.status_code}", "message": str(exc.detail), "request_id": request_id}
+        v2_codes = {401: "AUTH_INVALID", 403: "PERMISSION_DENIED", 404: "TENANT_RESOURCE_NOT_FOUND", 409: "BINDING_CONFLICT", 422: "VALIDATION_ERROR", 429: "RATE_LIMITED", 500: "INTERNAL_ERROR"}
+        code = v2_codes.get(exc.status_code, f"HTTP_{exc.status_code}") if request.url.path.startswith("/api/v2/") else f"HTTP_{exc.status_code}"
+        error = {"code": code, "message": str(exc.detail), "details": {}, "request_id": request_id}
     return JSONResponse(status_code=exc.status_code, content={"error": error})
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
-    return JSONResponse(status_code=422, content={"error": {"code": "VALIDATION_ERROR", "message": "提交内容格式不正确", "details": exc.errors()}})
+    request_id = getattr(request.state, "request_id", request.headers.get("X-Request-ID", ""))
+    return JSONResponse(status_code=422, content={"error": {"code": "VALIDATION_ERROR", "message": "提交内容格式不正确", "details": exc.errors(), "request_id": request_id}})
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)

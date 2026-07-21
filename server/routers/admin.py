@@ -18,6 +18,7 @@ from client_v2.product import APP_VERSION
 
 from ..config import get_settings
 from ..database import get_db
+from ..enterprise.features import CLIENT_CONFIG_KEYS, bump_feature_config_epoch
 from ..models import Admin, AuditLog, CheckItem, CheckProfile, CheckReport, Code, Customer, Device, DownloadStat, LiveRoom, Release, Setting, SupportCase, User, UserSession, now_iso
 from ..schemas import CodeGenerateRequest, CodeStatusRequest, CustomerIn, DeviceIn, LoginRequest, ProfileIn, ReleaseActivateIn, RoomIn, SettingsIn, SupportIn
 from ..security import clear_login_attempts, current_admin, make_session, permissions_for, rate_limit_login, request_ip, require_csrf, verify_password
@@ -336,6 +337,8 @@ def save_settings(payload: SettingsIn, admin: dict = Depends(require_csrf), db: 
         row = db.get(Setting, key)
         if row: row.value = value
         else: db.add(Setting(key=key, value=value))
+    if set(payload.values) & CLIENT_CONFIG_KEYS:
+        bump_feature_config_epoch(db)
     audit(db, admin["username"], "save_settings", "settings"); db.commit()
     return {"ok": True}
 
