@@ -9,6 +9,11 @@ class MemberLoginIn(BaseModel):
     organization_code:str|None=Field(default=None,min_length=2,max_length=40)
 class MemberCreateIn(BaseModel):username:str=Field(min_length=3,max_length=80);password:str=Field(min_length=8,max_length=256);display_name:str=Field(default="",max_length=80);role:Literal["owner","manager","operator","viewer"]="viewer"
 class MemberRoleUpdateIn(BaseModel):role:Literal["owner","manager","operator","viewer"];active:bool=True
+class OrganizationProfileIn(BaseModel):
+    name:str=Field(min_length=1,max_length=120)
+    short_name:str=Field(default="",max_length=80)
+    contact:str=Field(default="",max_length=160)
+    timezone:str=Field(default="Asia/Shanghai",max_length=80)
 class AccountCreateIn(BaseModel):display_name:str=Field(min_length=1,max_length=120);room_id:int|None=None;platform_account_ref:str=Field(default="",max_length=160);target_region_id:str=Field(default="us-los-angeles",max_length=80)
 class AnchorCreateIn(BaseModel):display_name:str=Field(min_length=1,max_length=120);employee_ref:str=Field(default="",max_length=80)
 class RoomCreateIn(BaseModel):name:str=Field(min_length=1,max_length=120);region:str=Field(default="",max_length=80)
