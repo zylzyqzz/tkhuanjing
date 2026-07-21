@@ -16,7 +16,7 @@ COPY client_v2/__init__.py client_v2/product.py client_v2/regions.py /app/client
 COPY alembic.ini /app/alembic.ini
 COPY migrations /app/migrations
 COPY admin/dist /app/admin/dist
-COPY assets/logo-web.png /app/assets/logo-web.png
+COPY assets /app/assets
 
 EXPOSE 8000
 
