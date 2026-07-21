@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import{computed,onMounted,ref}from'vue';import{platformApi}from'../services/platform'
 const plans=[{code:'trial',name:'试用版'},{code:'basic',name:'基础版'},{code:'pro',name:'专业版'},{code:'custom',name:'定制版'}]
-const plan=ref('trial'),features=ref<any[]>([]),organizations=ref<any[]>([]),baseline=ref(''),loading=ref(true),saving=ref(false),error=ref(''),notice=ref('')
+const plan=ref('trial'),features=ref<any[]>([]),organizations=ref<any[]>([]),baseline=ref('[]'),loading=ref(true),saving=ref(false),error=ref(''),notice=ref('')
 const dirty=computed(()=>JSON.stringify(features.value)!==baseline.value),affected=computed(()=>organizations.value.filter(x=>x.plan_code===plan.value).length)
 const format=(value:any)=>JSON.stringify(value||{},null,2)
 function parse(value:string,label:string){try{const parsed=JSON.parse(value||'{}');if(!parsed||Array.isArray(parsed)||typeof parsed!=='object')throw new Error();return parsed}catch{throw new Error(`${label} 必须是 JSON 对象`)}}

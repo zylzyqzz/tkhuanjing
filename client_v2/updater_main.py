@@ -12,7 +12,7 @@ def wait_process(pid: int, timeout: int = 60) -> None:
     try:
         process = psutil.Process(pid); process.wait(timeout=timeout)
     except (psutil.NoSuchProcess, psutil.TimeoutExpired):
-        pass
+        return
 
 
 def main() -> int:
@@ -27,4 +27,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

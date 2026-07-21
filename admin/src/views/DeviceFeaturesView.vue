@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import{computed,onMounted,reactive,ref}from'vue';import{platformApi}from'../services/platform'
-const organizations=ref<any[]>([]),devices=ref<any[]>([]),rows=ref<any[]>([]),data=ref<any>(null),organizationId=ref(''),deviceId=ref(''),baseline=ref(''),loading=ref(true),saving=ref(false),error=ref(''),notice=ref('');const filters=reactive({keyword:'',agent_version:''})
+const organizations=ref<any[]>([]),devices=ref<any[]>([]),rows=ref<any[]>([]),data=ref<any>(null),organizationId=ref(''),deviceId=ref(''),baseline=ref('[]'),loading=ref(true),saving=ref(false),error=ref(''),notice=ref('');const filters=reactive({keyword:'',agent_version:''})
 const dirty=computed(()=>JSON.stringify(rows.value)!==baseline.value)
 async function boot(){try{organizations.value=(await platformApi.organizations()).tenants||[];if(organizations.value.length){organizationId.value=String(organizations.value[0].id);await loadDevices()}}catch(e:any){error.value=e.message;loading.value=false}}
 async function loadDevices(){loading.value=true;error.value='';deviceId.value='';rows.value=[];try{const params=new URLSearchParams({organization_id:organizationId.value,limit:'200'});if(filters.keyword)params.set('keyword',filters.keyword);if(filters.agent_version)params.set('agent_version',filters.agent_version);devices.value=(await platformApi.devices(params)).items||[];if(devices.value.length){deviceId.value=devices.value[0].device_id;await loadFeatures()}}catch(e:any){error.value=e.message}finally{loading.value=false}}

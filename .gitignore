@@ -9,6 +9,8 @@ __pycache__/
 htmlcov/
 node_modules/
 admin/dist/
+admin/test-results/
+admin/playwright-report/
 *.tsbuildinfo
 build*/
 dist*/

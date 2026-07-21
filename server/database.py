@@ -9,7 +9,7 @@ from .config import get_settings
 
 
 class Base(DeclarativeBase):
-    pass
+    """Declarative base shared by the legacy and enterprise models."""
 
 
 settings = get_settings()
@@ -35,4 +35,3 @@ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False
 def get_db() -> Generator[Session, None, None]:
     with SessionLocal() as session:
         yield session
-

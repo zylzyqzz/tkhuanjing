@@ -260,7 +260,7 @@ def providers(_admin: dict = Depends(current_admin), db: Session = Depends(get_d
                 checked = datetime.fromisoformat(row.checked_at.replace("Z", "+00:00")); checked = checked if checked.tzinfo else checked.replace(tzinfo=timezone.utc)
                 samples_7d += int(checked >= now - timedelta(days=7)); samples_30d += int(checked >= now - timedelta(days=30))
                 periods["00-08" if checked.hour < 8 else "08-18" if checked.hour < 18 else "18-24"] += 1
-            except ValueError: pass
+            except ValueError: continue
         advice="待核实" if valid<10 else "谨慎" if (statistics.median(jitters) if jitters else 0)>30 or (statistics.median(losses) if losses else 0)>1 else "适合"
         result.append({k:v for k,v in group.items() if k not in {"reports","devices"}} | {"sample_count":len(group["reports"]),"valid_samples":valid,"unique_devices":len(group["devices"]),"samples_7d":samples_7d,"samples_30d":samples_30d,"time_periods":periods,"last_checked_at":group["reports"][0].checked_at,"median_upload_mbps":round(statistics.median(uploads),2) if uploads else None,"p95_upload_mbps":sorted(uploads)[max(0,round((len(uploads)-1)*.95))] if uploads else None,"median_jitter_ms":round(statistics.median(jitters),2) if jitters else None,"median_latency_ms":round(statistics.median(latencies),2) if latencies else None,"median_packet_loss":round(statistics.median(losses),2) if losses else None,"confidence":confidence,"advice":advice})
     return {"providers": sorted(result,key=lambda x:x["sample_count"],reverse=True)}

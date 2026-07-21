@@ -17,7 +17,7 @@ from .storage import DATA_DIR
 
 
 class UpdateError(RuntimeError):
-    pass
+    """Raised when an update cannot be verified or safely installed."""
 
 
 def manifest_payload(manifest: dict) -> bytes:

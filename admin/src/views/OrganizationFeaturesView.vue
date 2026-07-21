@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import{computed,onMounted,ref}from'vue';import{platformApi}from'../services/platform'
-const organizations=ref<any[]>([]),organizationId=ref(''),query=ref(''),data=ref<any>(null),rows=ref<any[]>([]),baseline=ref(''),loading=ref(true),saving=ref(false),error=ref(''),notice=ref('')
+const organizations=ref<any[]>([]),organizationId=ref(''),query=ref(''),data=ref<any>(null),rows=ref<any[]>([]),baseline=ref('[]'),loading=ref(true),saving=ref(false),error=ref(''),notice=ref('')
 const filteredOrganizations=computed(()=>organizations.value.filter(x=>!query.value||`${x.name} ${x.tenant_code}`.toLowerCase().includes(query.value.toLowerCase()))),dirty=computed(()=>JSON.stringify(rows.value)!==baseline.value)
 const toLocal=(value:any)=>value?String(value).slice(0,16):''
 function parseConfig(row:any){try{const value=JSON.parse(row.configText||'{}');if(!value||Array.isArray(value)||typeof value!=='object')throw new Error();return value}catch{throw new Error(`${row.name} 的配置不是有效 JSON 对象`)}}

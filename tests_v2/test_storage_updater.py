@@ -64,9 +64,9 @@ def test_client_api_contract(monkeypatch):
         def __init__(self, value): self.value = value
         def json(self): return self.value
     class FakeClient:
-        def __init__(self, **kwargs): pass
+        def __init__(self, **kwargs): return None
         def __enter__(self): return self
-        def __exit__(self, *args): pass
+        def __exit__(self, *args): return None
         def request(self, method, path, **kwargs):
             if path.endswith('/register'): return Response({'device_token':'TOKEN','license':{'tier':'FREE'}})
             if path.endswith('/profile'): return Response({'packet_loss_warning':1})
@@ -91,9 +91,9 @@ def test_client_api_error_envelope(monkeypatch):
         is_error=True; status_code=403
         def json(self): return {'error':{'message':'授权失败'}}
     class FakeClient:
-        def __init__(self, **kwargs): pass
+        def __init__(self, **kwargs): return None
         def __enter__(self): return self
-        def __exit__(self,*args): pass
+        def __exit__(self,*args): return None
         def request(self,*args,**kwargs): return BadResponse()
     monkeypatch.setattr('client_v2.api.httpx.Client', FakeClient)
     with pytest.raises(ApiError, match='授权失败'):

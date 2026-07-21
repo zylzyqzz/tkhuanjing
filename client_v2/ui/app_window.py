@@ -299,7 +299,7 @@ class AppWindow(QWidget):
                 studio=payload["studio_state"]
                 if studio!=self._last_studio_state and self._last_studio_state!="unknown": self._send_event("studio_started" if studio=="running" else "studio_stopped")
                 self._last_studio_state=studio
-            except Exception: pass
+            except Exception as exc: self._logger.debug("legacy heartbeat failed: %s",exc)
             finally: self._heartbeat_running=False
         threading.Thread(target=send,daemon=True,name="enterprise-heartbeat").start()
 
@@ -311,7 +311,7 @@ class AppWindow(QWidget):
         def send():
             try:
                 result=ClientApi(self.config["api_base"],credentials["device_token"]).upload_events([event]); acknowledge_device_events(result.get("accepted",[]))
-            except Exception: pass
+            except Exception as exc: self._logger.debug("device event upload failed: %s",exc)
         threading.Thread(target=send,daemon=True,name="enterprise-event").start()
     def _open_account(self):
         AccountDialog(self).exec()

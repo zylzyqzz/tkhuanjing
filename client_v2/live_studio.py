@@ -24,7 +24,7 @@ def candidate_paths(custom_path: str = "") -> list[Path]:
             )
             values += discovered.splitlines()
         except Exception:
-            pass
+            discovered = ""
     seen: set[str] = set()
     result = []
     for value in values:

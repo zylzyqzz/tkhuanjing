@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QComboBox,QDialog,QFormLayout,QLabel,QLineEdit,QMessageBox,QPushButton,QVBoxLayout
 
-from ..api import ClientApi
+from ..api import ApiError,ClientApi
 from ..product import APP_VERSION
-from ..storage import load_config,load_credentials,save_credentials
+from ..storage import clear_credentials,load_config,load_credentials,save_credentials
 
 
 class EnterpriseBindingDialog(QDialog):
@@ -55,11 +55,22 @@ class EnterpriseBindingDialog(QDialog):
             if QMessageBox.question(self,"确认更换直播间",message,QMessageBox.Yes|QMessageBox.No,QMessageBox.No)!=QMessageBox.Yes:return
         try:
             value=self.api.v2_bind(token,{"room_id":self.room.currentData(),"account_id":self.account.currentData(),"anchor_id":self.anchor.currentData(),"binding_type":"primary","reason":"客户端确认换绑" if self.current_binding else "客户端首次绑定"});save_credentials(v2_binding_id=str(value["binding"]["id"]));self.current_binding=value["binding"];self.unbind_button.setVisible(True);self.status.setText(f"当前直播间：{room_name} / {anchor_name} / {account_name}");QMessageBox.information(self,"绑定完成",f"绑定成功。\n\n电脑：本机\n直播间：{room_name}\n主播：{anchor_name}\n账号：{account_name}\n\n客户端将在 20 秒内开始同步状态。")
-        except Exception as exc:QMessageBox.warning(self,"绑定未完成",f"{exc}\n\n请确认直播间没有绑定其他主电脑，然后重试。")
+        except Exception as exc:
+            if self._session_expired(exc):return
+            QMessageBox.warning(self,"绑定未完成",f"{exc}\n\n请确认直播间没有绑定其他主电脑，然后重试。")
 
     def unbind(self):
         token=load_credentials().get("organization_member_token","")
         if not token:return
         if QMessageBox.warning(self,"确认解除绑定","解除后，这台电脑的新检测数据将不再归属当前直播间；历史数据不会删除。",QMessageBox.Yes|QMessageBox.No,QMessageBox.No)!=QMessageBox.Yes:return
         try:self.api.v2_unbind(token,"客户端确认解绑");self.current_binding=None;self.unbind_button.setVisible(False);self.status.setText("已解除绑定。请重新选择直播间后完成绑定。");QMessageBox.information(self,"已解除绑定","当前绑定已解除，历史数据保持不变。")
-        except Exception as exc:QMessageBox.warning(self,"解除绑定失败",str(exc))
+        except Exception as exc:
+            if self._session_expired(exc):return
+            QMessageBox.warning(self,"解除绑定失败",str(exc))
+
+    def _session_expired(self,exc:Exception)->bool:
+        if isinstance(exc,ApiError) and (exc.code in {"AUTH_INVALID","AUTH_EXPIRED"} or exc.status_code==401):
+            clear_credentials("organization_member_token");self.status.setText("企业登录会话已过期，请重新输入密码登录后继续。")
+            QMessageBox.warning(self,"登录已过期","企业登录会话已失效，当前绑定没有改变。请重新登录后继续。")
+            return True
+        return False

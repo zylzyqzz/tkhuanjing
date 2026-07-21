@@ -37,3 +37,5 @@ def downgrade():
         existing = {item["name"] for item in inspector.get_indexes(table)}
         if name in existing:
             op.drop_index(name, table_name=table)
+    settings = sa.table("settings", sa.column("key", sa.String), sa.column("value", sa.Text))
+    op.get_bind().execute(sa.delete(settings).where(settings.c.key == "feature_config_epoch"))

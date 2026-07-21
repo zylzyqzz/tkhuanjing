@@ -122,7 +122,7 @@ def execute_setup_action(action: SetupAction, region: RegionProfile) -> SetupAct
                             path.unlink()
                             removed += 1
                         except OSError:
-                            pass
+                            continue
             ok, message, recovery = True, f"已清理 {removed} 个白名单临时缓存文件", {"files_removed": removed, "recoverable": False}
         else:
             ok, message, recovery = False, "不支持的配置动作", {}

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import{computed,onMounted,ref}from'vue';import{platformApi}from'../services/platform'
 const roles=[{code:'owner',name:'企业主管'},{code:'manager',name:'企业经理'},{code:'operator',name:'企业运维'},{code:'viewer',name:'只读人员'}],actions=['read','create','update','delete','manage']
-const organizations=ref<any[]>([]),organizationId=ref(''),role=ref('owner'),rows=ref<any[]>([]),basePermissions=ref<string[]>([]),baseline=ref(''),loading=ref(true),saving=ref(false),error=ref(''),notice=ref('')
+const organizations=ref<any[]>([]),organizationId=ref(''),role=ref('owner'),rows=ref<any[]>([]),basePermissions=ref<string[]>([]),baseline=ref('[]'),loading=ref(true),saving=ref(false),error=ref(''),notice=ref('')
 const dirty=computed(()=>JSON.stringify(rows.value)!==baseline.value)
 async function boot(){try{organizations.value=(await platformApi.organizations()).tenants||[];if(organizations.value.length){organizationId.value=String(organizations.value[0].id);await load()}}catch(e:any){error.value=e.message;loading.value=false}}
 async function load(){if(!organizationId.value)return;loading.value=true;error.value='';notice.value='';try{const value=await platformApi.roleFeatures(organizationId.value,role.value);rows.value=value.items;basePermissions.value=value.base_permissions||[];baseline.value=JSON.stringify(rows.value)}catch(e:any){error.value=e.message}finally{loading.value=false}}

@@ -144,3 +144,31 @@ def test_postgresql_binding_concurrency_is_transactionally_safe():
         assert len(active) == 1
         assert active[0].room_id in {room_ids[1], room_ids[2]}
     engine.dispose()
+
+
+def test_postgresql_baseline_upgrade_and_closeout_downgrade_are_reversible():
+    root = Path(__file__).parents[1]
+    parsed = make_url(POSTGRES_URL)
+    if "test" not in (parsed.database or "").lower():
+        pytest.fail("PostgreSQL migration tests refuse to reset a database without 'test' in its name")
+    engine = create_engine(POSTGRES_URL, pool_pre_ping=True)
+    with engine.begin() as connection:
+        connection.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
+        connection.execute(text("CREATE SCHEMA public"))
+    environment = dict(os.environ, TK_DATABASE_URL=POSTGRES_URL)
+    for target in ("20260721_02", "head", "20260721_03", "head"):
+        command = "downgrade" if target == "20260721_03" else "upgrade"
+        subprocess.run(
+            [sys.executable, "-m", "alembic", command, target],
+            cwd=root,
+            env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    with engine.connect() as connection:
+        version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+        epoch = connection.execute(text("SELECT value FROM settings WHERE key='feature_config_epoch'")).scalar_one()
+    assert version == "20260721_04"
+    assert int(epoch) >= 1
+    engine.dispose()

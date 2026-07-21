@@ -135,7 +135,7 @@ def network_checks(ctx: CheckContext) -> list[CheckResult]:
     try:
         gateway = powershell("(Get-NetIPConfiguration | Where-Object {$_.IPv4DefaultGateway} | Select-Object -First 1 -ExpandProperty IPv4DefaultGateway).NextHop")
     except Exception:
-        pass
+        gateway = ""
     probes: list[dict] = []
     for label, host in (("本地网关", gateway), ("国内公共节点", "223.5.5.5"), ("公共 DNS", "1.1.1.1")):
         if not host:
@@ -214,7 +214,7 @@ def performance_checks(ctx: CheckContext) -> list[CheckResult]:
         try:
             cpu_name = powershell("(Get-CimInstance Win32_Processor | Select-Object -First 1 -ExpandProperty Name)") or cpu_name
         except Exception:
-            pass
+            cpu_name = cpu_name or ""
     cpu = psutil.cpu_percent(interval=1)
     memory = psutil.virtual_memory()
     disk = psutil.disk_usage(Path.home().anchor)
