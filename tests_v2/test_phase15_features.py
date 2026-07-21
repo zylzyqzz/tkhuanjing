@@ -149,3 +149,17 @@ def test_phase15_information_architecture_and_client_entry_contracts():
     assert "platform-overview" in router and "enterprise-dashboard" in router and "access-state" in router
     for label in ("开播准备","当前直播间","设备状态","帮助与诊断"):assert label in sidebar
     assert sidebar.count('("home"')==1 and "历史数据不会修改" in binding and "QMessageBox.question" in binding
+
+
+def test_rollout_and_role_permission_update_config_version(tmp_path):
+    with build_app(tmp_path) as client:
+        org, member = organization_fixture(client);admin=admin_headers(client)
+        bootstrap=client.get("/api/v2/organization/bootstrap",headers=member).json();version=bootstrap["config_version"]
+        definitions=client.get("/api/v2/platform/features",headers=admin).json()["items"]
+        feature=next(x for x in definitions if x["feature_code"]=="live_dashboard")
+        rollout=client.post(f"/api/v2/platform/features/{feature['id']}/rollouts",headers=admin,json={"rollout_type":"percentage","percentage":25,"minimum_version":"2.1.0","status":"active"})
+        assert rollout.status_code==200 and rollout.json()["percentage"]==25
+        role=client.put(f"/api/v2/platform/organizations/{org}/roles/viewer/features",headers=admin,json={"items":[{"feature_code":"device_center","can_read":False}]})
+        assert role.status_code==200 and role.json()["config_version"]>version
+        items=client.get(f"/api/v2/platform/organizations/{org}/roles/viewer/features",headers=admin).json()["items"]
+        assert next(x for x in items if x["feature_code"]=="device_center")["read"] is False

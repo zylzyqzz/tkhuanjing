@@ -7,14 +7,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import Admin,AuditLog,Customer,Device,LiveRoom,now_iso
-from ..models_enterprise import AnchorProfile,DeviceFeatureOverride,DeviceHeartbeatV2,DeviceRoomBinding,FeatureDefinition,FeatureRollout,LiveAccount,OrganizationFeature,OrganizationMember,OrganizationMemberSession,PlanFeature
-from ..schemas_v2 import AccountCreateIn,AnchorCreateIn,BindingDeleteIn,BindingPutIn,FeatureAssignmentIn,FeatureAssignmentsIn,FeatureDefinitionIn,HeartbeatIn,MemberCreateIn,MemberLoginIn,MemberRoleUpdateIn,OnboardingProgressIn,RoomCreateIn
+from ..models_enterprise import AnchorProfile,DeviceFeatureOverride,DeviceHeartbeatV2,DeviceRoomBinding,FeatureDefinition,FeatureRollout,LiveAccount,OrganizationFeature,OrganizationMember,OrganizationMemberSession,PlanFeature,RoleFeaturePermission
+from ..schemas_v2 import AccountCreateIn,AnchorCreateIn,BindingDeleteIn,BindingPutIn,FeatureAssignmentIn,FeatureAssignmentsIn,FeatureDefinitionIn,FeatureRolloutIn,HeartbeatIn,MemberCreateIn,MemberLoginIn,MemberRoleUpdateIn,OnboardingProgressIn,RoleFeaturePermissionsIn,RoomCreateIn
 from ..security import current_platform_admin,enforce_rate_limit,hasher,request_ip,require_platform_csrf,verify_password
 from ..enterprise.common import ROLE_PERMISSIONS,TenantContext,audit_v2,organization,organization_by_code,page,require_permission,tenant_row,token_hash
 from ..enterprise.organization_service import OrganizationService
 from ..enterprise.security import current_member,current_v2_device,revoke_member_sessions
 from ..enterprise.bindings import get_active_primary_binding
-from ..enterprise.features import FeatureService,require_feature,require_feature_permission,seed_feature_definitions
+from ..enterprise.features import FeatureService,require_feature,require_feature_permission,seed_feature_definitions,validate_feature_config
 from ..config import get_settings
 
 router=APIRouter(prefix="/api/v2",tags=["enterprise-v2"])
@@ -216,7 +216,9 @@ def update_feature(feature_id:int,payload:FeatureDefinitionIn,admin:dict=Depends
  if not row:raise HTTPException(404,{"code":"TENANT_RESOURCE_NOT_FOUND","message":"功能不存在"})
  before=_feature_view(row)
  for key in ("feature_code","feature_name","category","description","client_type","default_enabled","status","minimum_client_version"):setattr(row,key,getattr(payload,key))
- row.config_schema_json=json.dumps(payload.config_schema,ensure_ascii=False);db.add(AuditLog(actor=admin["username"],action="update_feature",target_type="feature_definition",target_id=str(row.id),details=json.dumps({"before":before,"after":_feature_view(row)},ensure_ascii=False,default=str)));db.commit();return _feature_view(row)
+ row.config_schema_json=json.dumps(payload.config_schema,ensure_ascii=False)
+ for org in db.scalars(select(Customer)).all():org.feature_config_version+=1
+ db.add(AuditLog(actor=admin["username"],action="update_feature",target_type="feature_definition",target_id=str(row.id),details=json.dumps({"before":before,"after":_feature_view(row)},ensure_ascii=False,default=str)));db.commit();return _feature_view(row)
 
 def _feature_by_code(db:Session,code:str)->FeatureDefinition:
  seed_feature_definitions(db)
@@ -231,7 +233,7 @@ def platform_plan_features(plan_id:str,admin:dict=Depends(current_platform_admin
 @router.put("/platform/plans/{plan_id}/features")
 def update_plan_features(plan_id:str,payload:FeatureAssignmentsIn,admin:dict=Depends(require_platform_csrf),db:Session=Depends(get_db))->dict:
  for item in payload.items:
-  feature=_feature_by_code(db,item.feature_code);row=db.scalar(select(PlanFeature).where(PlanFeature.plan_id==plan_id,PlanFeature.feature_id==feature.id)) or PlanFeature(plan_id=plan_id,feature_id=feature.id);row.enabled=item.enabled;row.limits_json=json.dumps(item.limits,ensure_ascii=False);row.config_json=json.dumps(item.config,ensure_ascii=False);db.add(row)
+  feature=_feature_by_code(db,item.feature_code);validate_feature_config(feature,item.config);row=db.scalar(select(PlanFeature).where(PlanFeature.plan_id==plan_id,PlanFeature.feature_id==feature.id)) or PlanFeature(plan_id=plan_id,feature_id=feature.id);row.enabled=item.enabled;row.limits_json=json.dumps(item.limits,ensure_ascii=False);row.config_json=json.dumps(item.config,ensure_ascii=False);db.add(row)
  for org in db.scalars(select(Customer).where(Customer.plan_code==plan_id)).all():org.feature_config_version+=1
  db.add(AuditLog(actor=admin["username"],action="update_plan_features",target_type="subscription_plan",target_id=plan_id,details=json.dumps(payload.model_dump(mode="json"),ensure_ascii=False)));db.commit();return {"ok":True}
 
@@ -243,7 +245,7 @@ def platform_organization_features(organization_id:int,admin:dict=Depends(curren
 def update_organization_features(organization_id:int,payload:FeatureAssignmentsIn,admin:dict=Depends(require_platform_csrf),db:Session=Depends(get_db))->dict:
  org=organization(db,organization_id)
  for item in payload.items:
-  feature=_feature_by_code(db,item.feature_code);row=db.scalar(select(OrganizationFeature).where(OrganizationFeature.organization_id==organization_id,OrganizationFeature.feature_id==feature.id)) or OrganizationFeature(organization_id=organization_id,feature_id=feature.id,enabled=item.enabled);row.enabled=item.enabled;row.source=item.source;row.config_json=json.dumps(item.config,ensure_ascii=False);row.starts_at=item.starts_at;row.expires_at=item.expires_at;row.updated_by=admin["username"];db.add(row)
+  feature=_feature_by_code(db,item.feature_code);validate_feature_config(feature,item.config);row=db.scalar(select(OrganizationFeature).where(OrganizationFeature.organization_id==organization_id,OrganizationFeature.feature_id==feature.id)) or OrganizationFeature(organization_id=organization_id,feature_id=feature.id,enabled=item.enabled);row.enabled=item.enabled;row.source=item.source;row.config_json=json.dumps(item.config,ensure_ascii=False);row.starts_at=item.starts_at;row.expires_at=item.expires_at;row.updated_by=admin["username"];db.add(row)
  org.feature_config_version+=1;db.add(AuditLog(actor=admin["username"],action="update_organization_features",target_type="customer",target_id=str(org.id),details=json.dumps(payload.model_dump(mode="json"),ensure_ascii=False)));db.commit();return {"ok":True,"config_version":org.feature_config_version}
 
 @router.get("/platform/devices/{device_id}/features")
@@ -257,5 +259,44 @@ def update_device_features(device_id:str,payload:FeatureAssignmentsIn,admin:dict
  device=db.get(Device,device_id)
  if not device or not device.customer_id:raise HTTPException(404,{"code":"TENANT_RESOURCE_NOT_FOUND","message":"设备不存在或尚未加入企业"})
  for item in payload.items:
-  feature=_feature_by_code(db,item.feature_code);row=db.scalar(select(DeviceFeatureOverride).where(DeviceFeatureOverride.device_id==device_id,DeviceFeatureOverride.feature_id==feature.id)) or DeviceFeatureOverride(organization_id=device.customer_id,device_id=device_id,feature_id=feature.id,enabled=item.enabled);row.enabled=item.enabled;row.config_json=json.dumps(item.config,ensure_ascii=False);row.reason=item.reason;row.expires_at=item.expires_at;db.add(row)
+  feature=_feature_by_code(db,item.feature_code);validate_feature_config(feature,item.config);row=db.scalar(select(DeviceFeatureOverride).where(DeviceFeatureOverride.device_id==device_id,DeviceFeatureOverride.feature_id==feature.id)) or DeviceFeatureOverride(organization_id=device.customer_id,device_id=device_id,feature_id=feature.id,enabled=item.enabled);row.enabled=item.enabled;row.config_json=json.dumps(item.config,ensure_ascii=False);row.reason=item.reason;row.expires_at=item.expires_at;db.add(row)
  device.feature_config_version+=1;db.add(AuditLog(actor=admin["username"],action="update_device_features",target_type="device",target_id=device_id,details=json.dumps(payload.model_dump(mode="json"),ensure_ascii=False)));db.commit();return {"ok":True,"config_version":device.feature_config_version}
+
+@router.get("/platform/organizations/{organization_id}/roles/{role}/features")
+def platform_role_features(organization_id:int,role:str,admin:dict=Depends(current_platform_admin),db:Session=Depends(get_db))->dict:
+ organization(db,organization_id);features=FeatureService(db,organization_id).get_effective_features_for_organization(role);return {"role":role,"items":[{"feature_code":code,**item["permissions"]} for code,item in features.items()]}
+
+@router.put("/platform/organizations/{organization_id}/roles/{role}/features")
+def update_role_features(organization_id:int,role:str,payload:RoleFeaturePermissionsIn,admin:dict=Depends(require_platform_csrf),db:Session=Depends(get_db))->dict:
+ if role not in ROLE_PERMISSIONS:raise HTTPException(422,{"code":"VALIDATION_ERROR","message":"角色不存在"})
+ org=organization(db,organization_id)
+ for item in payload.items:
+  feature=_feature_by_code(db,item.feature_code);row=db.scalar(select(RoleFeaturePermission).where(RoleFeaturePermission.organization_id==organization_id,RoleFeaturePermission.role==role,RoleFeaturePermission.feature_id==feature.id)) or RoleFeaturePermission(organization_id=organization_id,role=role,feature_id=feature.id)
+  for action in ("read","create","update","delete","manage"):setattr(row,f"can_{action}",getattr(item,f"can_{action}"))
+  db.add(row)
+ org.feature_config_version+=1;db.add(AuditLog(actor=admin["username"],action="update_role_features",target_type="organization_role",target_id=f"{organization_id}:{role}",details=json.dumps(payload.model_dump(),ensure_ascii=False)));db.commit();return {"ok":True,"config_version":org.feature_config_version}
+
+def _rollout_view(row:FeatureRollout)->dict:
+ return {"id":row.id,"feature_id":row.feature_id,"rollout_type":row.rollout_type,"percentage":row.percentage,"organization_ids":json.loads(row.organization_ids_json or "[]"),"device_ids":json.loads(row.device_ids_json or "[]"),"minimum_version":row.minimum_version,"starts_at":row.starts_at,"ends_at":row.ends_at,"status":row.status,"updated_at":row.updated_at}
+
+@router.get("/platform/features/{feature_id}/rollouts")
+def platform_feature_rollouts(feature_id:int,admin:dict=Depends(current_platform_admin),db:Session=Depends(get_db))->dict:
+ if not db.get(FeatureDefinition,feature_id):raise HTTPException(404,{"code":"FEATURE_NOT_FOUND","message":"功能不存在"})
+ return {"items":[_rollout_view(x) for x in db.scalars(select(FeatureRollout).where(FeatureRollout.feature_id==feature_id).order_by(FeatureRollout.id.desc())).all()]}
+
+@router.post("/platform/features/{feature_id}/rollouts")
+def create_feature_rollout(feature_id:int,payload:FeatureRolloutIn,admin:dict=Depends(require_platform_csrf),db:Session=Depends(get_db))->dict:
+ if not db.get(FeatureDefinition,feature_id):raise HTTPException(404,{"code":"FEATURE_NOT_FOUND","message":"功能不存在"})
+ row=FeatureRollout(feature_id=feature_id,rollout_type=payload.rollout_type,percentage=payload.percentage,organization_ids_json=json.dumps(payload.organization_ids),device_ids_json=json.dumps(payload.device_ids),minimum_version=payload.minimum_version,starts_at=payload.starts_at,ends_at=payload.ends_at,status=payload.status);db.add(row);db.flush()
+ for org in db.scalars(select(Customer)).all():org.feature_config_version+=1
+ db.add(AuditLog(actor=admin["username"],action="change_rollout",target_type="feature_rollout",target_id=str(row.id),details=json.dumps(payload.model_dump(mode="json"),ensure_ascii=False)));db.commit();return _rollout_view(row)
+
+@router.put("/platform/features/{feature_id}/rollouts/{rollout_id}")
+def update_feature_rollout(feature_id:int,rollout_id:int,payload:FeatureRolloutIn,admin:dict=Depends(require_platform_csrf),db:Session=Depends(get_db))->dict:
+ row=db.scalar(select(FeatureRollout).where(FeatureRollout.id==rollout_id,FeatureRollout.feature_id==feature_id))
+ if not row:raise HTTPException(404,{"code":"FEATURE_NOT_FOUND","message":"灰度规则不存在"})
+ before=_rollout_view(row)
+ for key in ("rollout_type","percentage","minimum_version","starts_at","ends_at","status"):setattr(row,key,getattr(payload,key))
+ row.organization_ids_json=json.dumps(payload.organization_ids);row.device_ids_json=json.dumps(payload.device_ids)
+ for org in db.scalars(select(Customer)).all():org.feature_config_version+=1
+ db.add(AuditLog(actor=admin["username"],action="change_rollout",target_type="feature_rollout",target_id=str(row.id),details=json.dumps({"before":before,"after":_rollout_view(row)},ensure_ascii=False,default=str)));db.commit();return _rollout_view(row)

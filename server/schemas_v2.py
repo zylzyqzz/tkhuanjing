@@ -45,3 +45,23 @@ class FeatureAssignmentsIn(BaseModel):items:list[FeatureAssignmentIn]
 class OnboardingProgressIn(BaseModel):
     step:int=Field(ge=1,le=7)
     completed:bool=False
+
+class RoleFeaturePermissionIn(BaseModel):
+    feature_code:str=Field(min_length=3,max_length=80)
+    can_read:bool=True
+    can_create:bool=False
+    can_update:bool=False
+    can_delete:bool=False
+    can_manage:bool=False
+
+class RoleFeaturePermissionsIn(BaseModel):items:list[RoleFeaturePermissionIn]
+
+class FeatureRolloutIn(BaseModel):
+    rollout_type:Literal["all","percentage","organizations","devices","internal"]="percentage"
+    percentage:int=Field(default=0,ge=0,le=100)
+    organization_ids:list[int]=Field(default_factory=list)
+    device_ids:list[str]=Field(default_factory=list)
+    minimum_version:str=Field(default="",max_length=40)
+    starts_at:datetime|None=None
+    ends_at:datetime|None=None
+    status:Literal["active","paused","ended"]="active"

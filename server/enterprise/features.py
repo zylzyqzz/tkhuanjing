@@ -62,6 +62,22 @@ def _version_tuple(value: str) -> tuple[int, ...]:
     return tuple((parts + [0, 0, 0])[:3])
 
 
+def validate_feature_config(feature: FeatureDefinition, config: dict) -> None:
+    schema = _json(feature.config_schema_json, {})
+    properties = schema.get("properties", {}) if isinstance(schema, dict) else {}
+    if not properties:
+        return
+    type_map={"string":str,"integer":int,"number":(int,float),"boolean":bool,"object":dict,"array":list}
+    if schema.get("additionalProperties") is False:
+        unknown=set(config)-set(properties)
+        if unknown:
+            raise HTTPException(422,{"code":"VALIDATION_ERROR","message":"功能配置包含未定义字段","details":{"fields":sorted(unknown)}})
+    for key,value in config.items():
+        expected=type_map.get((properties.get(key) or {}).get("type"))
+        if expected and (not isinstance(value,expected) or isinstance(value,bool) and expected in {int,(int,float)}):
+            raise HTTPException(422,{"code":"VALIDATION_ERROR","message":"功能配置字段类型不正确","details":{"field":key}})
+
+
 def seed_feature_definitions(db: Session) -> None:
     existing = set(db.scalars(select(FeatureDefinition.feature_code)).all())
     changed = False
