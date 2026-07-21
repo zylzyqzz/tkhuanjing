@@ -69,7 +69,8 @@ def provision_tenant(payload: TenantProvisionIn, admin: dict = Depends(require_c
     if admin.get("role") != "platform_super": raise HTTPException(status_code=403, detail="仅限平台管理员")
     if db.scalar(select(Admin).where(Admin.username==payload.owner_username)): raise HTTPException(status_code=409,detail="登录账号已存在")
     now=datetime.now(timezone.utc); expires=now+timedelta(days=payload.subscription_days)
-    tenant=Customer(name=payload.name,short_name=payload.short_name,contact=payload.contact,timezone=payload.timezone,plan_code=payload.plan_code,device_limit=payload.device_limit,member_limit=payload.member_limit,tenant_code=f"ENT-{secrets.token_hex(4).upper()}",subscription_starts_at=now.isoformat(),subscription_expires_at=expires.isoformat(),grace_ends_at=(expires+timedelta(days=7)).isoformat())
+    code=f"ENT-{secrets.token_hex(4).upper()}"
+    tenant=Customer(name=payload.name,short_name=payload.short_name,contact=payload.contact,timezone=payload.timezone,plan_code=payload.plan_code,device_limit=payload.device_limit,member_limit=payload.member_limit,tenant_code=code,organization_code=code,subscription_starts_at=now.isoformat(),subscription_expires_at=expires.isoformat(),grace_ends_at=(expires+timedelta(days=7)).isoformat())
     db.add(tenant); db.flush(); owner=Admin(username=payload.owner_username,password_hash=hasher.hash(payload.owner_password),customer_id=tenant.id,role="tenant_owner",display_name=payload.owner_name,password_changed_at=now_iso()); db.add(owner); db.flush(); audit(db,admin["username"],"provision_tenant","customer",str(tenant.id),payload.plan_code); db.commit()
     return {"ok":True,"tenant_id":tenant.id,"tenant_code":tenant.tenant_code,"owner_id":owner.id}
 

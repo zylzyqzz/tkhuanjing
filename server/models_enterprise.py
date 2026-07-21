@@ -16,7 +16,7 @@ class OrganizationMember(Base):
     __tablename__ = "organization_members"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     organization_id: Mapped[int] = mapped_column(Integer, ForeignKey("customers.id", ondelete="CASCADE"), index=True)
-    username: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    username: Mapped[str] = mapped_column(String(80), index=True)
     password_hash: Mapped[str] = mapped_column(Text)
     display_name: Mapped[str] = mapped_column(String(80), default="")
     phone: Mapped[str] = mapped_column(String(30), default="")
@@ -25,6 +25,7 @@ class OrganizationMember(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    __table_args__ = (UniqueConstraint("organization_id", "username", name="uq_org_member_username"),)
 
 
 class OrganizationMemberSession(Base):

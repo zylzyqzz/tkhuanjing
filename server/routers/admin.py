@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import shutil
+import secrets
 from datetime import date, datetime, timedelta, timezone
 import statistics
 from pathlib import Path
@@ -103,7 +104,7 @@ def customers(q: str = "", _admin: dict = Depends(current_admin), db: Session = 
 
 @router.post("/customer/save")
 def save_customer(payload: CustomerIn, admin: dict = Depends(require_csrf), db: Session = Depends(get_db)) -> dict:
-    row = db.get(Customer, payload.id) if payload.id else Customer(created_at=now_iso())
+    row = db.get(Customer, payload.id) if payload.id else Customer(created_at=now_iso(), organization_code=(payload.tenant_code or f"ORG-{secrets.token_hex(4).upper()}"))
     if not row:
         raise HTTPException(404, "客户不存在")
     for key, value in payload.model_dump(exclude={"id"}).items():

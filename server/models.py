@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -70,6 +70,7 @@ class Customer(Base):
     notes: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(20), default="active", index=True)
     tenant_code: Mapped[str] = mapped_column(String(40), default="", index=True)
+    organization_code: Mapped[str] = mapped_column(String(40), default="", index=True)
     short_name: Mapped[str] = mapped_column(String(80), default="")
     logo_url: Mapped[str] = mapped_column(String(500), default="")
     timezone: Mapped[str] = mapped_column(String(80), default="Asia/Shanghai")
@@ -131,6 +132,15 @@ class Device(Base):
     last_report_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
     module_summary_json: Mapped[str] = mapped_column(Text, default="{}")
     state_version: Mapped[int] = mapped_column(Integer, default=0)
+    online_state: Mapped[str] = mapped_column(String(20), default="offline", index=True)
+    collector_state: Mapped[str] = mapped_column(String(20), default="unknown", index=True)
+    cpu_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
+    memory_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
+    network_latency_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    upload_mbps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    stream_bitrate_kbps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    dropped_frames: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    clock_skew_seconds: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class StreamingAccount(Base):

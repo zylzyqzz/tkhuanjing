@@ -29,6 +29,9 @@ def organization(db:Session,organization_id:int)->Customer:
     if not row: raise HTTPException(404,"企业不存在或已停用")
     return row
 
+def organization_by_code(db: Session, code: str) -> Customer | None:
+    return db.scalar(select(Customer).where(Customer.organization_code == code, Customer.status == "active"))
+
 def tenant_row(db:Session,model,row_id:int,organization_id:int):
     row=db.scalar(select(model).where(model.id==row_id,model.organization_id==organization_id))
     if not row: raise HTTPException(404,"资源不存在")

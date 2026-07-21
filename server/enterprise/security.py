@@ -8,6 +8,18 @@ from ..models import Device
 from ..models_enterprise import OrganizationMember,OrganizationMemberSession
 from .common import TenantContext,token_hash
 
+def revoke_member_sessions(db: Session, member_id: int) -> int:
+    rows = db.scalars(select(OrganizationMemberSession).where(OrganizationMemberSession.member_id == member_id, OrganizationMemberSession.revoked.is_(False))).all()
+    for row in rows:
+        row.revoked = True
+    return len(rows)
+
+def revoke_organization_sessions(db: Session, organization_id: int) -> int:
+    rows = db.scalars(select(OrganizationMemberSession).where(OrganizationMemberSession.organization_id == organization_id, OrganizationMemberSession.revoked.is_(False))).all()
+    for row in rows:
+        row.revoked = True
+    return len(rows)
+
 def aware(value:datetime)->datetime:return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
 
 def current_member(authorization:str|None=Header(default=None),db:Session=Depends(get_db))->TenantContext:

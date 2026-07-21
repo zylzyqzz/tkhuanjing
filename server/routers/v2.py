@@ -2,7 +2,7 @@ from __future__ import annotations
 import json,secrets
 from datetime import datetime,timedelta,timezone
 from fastapi import APIRouter,Depends,HTTPException,Query,Request
-from sqlalchemy import or_,select
+from sqlalchemy import func,or_,select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from ..database import get_db
@@ -10,9 +10,10 @@ from ..models import Admin,AuditLog,Customer,Device,LiveRoom,now_iso
 from ..models_enterprise import AnchorProfile,DeviceHeartbeatV2,DeviceRoomBinding,LiveAccount,OrganizationMember,OrganizationMemberSession
 from ..schemas_v2 import AccountCreateIn,AnchorCreateIn,BindingDeleteIn,BindingPutIn,HeartbeatIn,MemberCreateIn,MemberLoginIn,MemberRoleUpdateIn
 from ..security import current_platform_admin,enforce_rate_limit,hasher,request_ip,require_platform_csrf,verify_password
-from ..enterprise.common import ROLE_PERMISSIONS,TenantContext,audit_v2,organization,page,require_permission,tenant_row,token_hash
+from ..enterprise.common import ROLE_PERMISSIONS,TenantContext,audit_v2,organization,organization_by_code,page,require_permission,tenant_row,token_hash
 from ..enterprise.organization_service import OrganizationService
-from ..enterprise.security import current_member,current_v2_device
+from ..enterprise.security import current_member,current_v2_device,revoke_member_sessions
+from ..enterprise.bindings import get_active_primary_binding
 
 router=APIRouter(prefix="/api/v2",tags=["enterprise-v2"])
 
@@ -22,7 +23,16 @@ def binding_view(x:DeviceRoomBinding)->dict:
 @router.post("/auth/login")
 def member_login(payload:MemberLoginIn,request:Request,db:Session=Depends(get_db))->dict:
  enforce_rate_limit("v2-member-login",f"{request_ip(request)}:{payload.username}",8,600)
- member=db.scalar(select(OrganizationMember).where(OrganizationMember.username==payload.username,OrganizationMember.active.is_(True)))
+ stmt=select(OrganizationMember).where(OrganizationMember.username==payload.username,OrganizationMember.active.is_(True))
+ if payload.organization_code:
+  org=organization_by_code(db,payload.organization_code)
+  if not org: raise HTTPException(401,"账号或密码错误")
+  stmt=stmt.where(OrganizationMember.organization_id==org.id)
+ member=db.scalar(stmt)
+ if not payload.organization_code:
+  matches=db.scalars(stmt).all()
+  if len(matches)>1: raise HTTPException(400,"AUTH_ORGANIZATION_REQUIRED")
+  member=matches[0] if matches else None
  if not member or not verify_password(payload.password,member.password_hash):raise HTTPException(401,"账号或密码错误")
  organization(db,member.organization_id);token=secrets.token_urlsafe(32);expires=datetime.now(timezone.utc)+timedelta(hours=12)
  db.add(OrganizationMemberSession(token_hash=token_hash(token),organization_id=member.organization_id,member_id=member.id,expires_at=expires));db.commit()
@@ -32,7 +42,7 @@ def member_login(payload:MemberLoginIn,request:Request,db:Session=Depends(get_db
 def platform_create_member(organization_id:int,payload:MemberCreateIn,admin:dict=Depends(require_platform_csrf),db:Session=Depends(get_db))->dict:
  if admin.get("role","platform_super")!="platform_super":raise HTTPException(403,"仅平台超级管理员可开通企业成员")
  organization(db,organization_id)
- if db.scalar(select(OrganizationMember).where(OrganizationMember.username==payload.username)):raise HTTPException(409,"成员账号已存在")
+ if db.scalar(select(OrganizationMember).where(OrganizationMember.organization_id==organization_id,OrganizationMember.username==payload.username)):raise HTTPException(409,"该企业成员账号已存在")
  row=OrganizationMember(organization_id=organization_id,username=payload.username,password_hash=hasher.hash(payload.password),display_name=payload.display_name,role=payload.role)
  db.add(row);db.flush();db.add(AuditLog(actor=admin["username"],action="v2_create_organization_member",target_type="organization_member",target_id=str(row.id),details=f"organization={organization_id},role={row.role}"));db.commit()
  return {"id":row.id,"organization_id":organization_id,"username":row.username,"role":row.role}
@@ -49,6 +59,8 @@ def update_organization_member(member_id:int,payload:MemberRoleUpdateIn,ctx:Tena
  row=tenant_row(db,OrganizationMember,member_id,ctx.organization_id)
  if row.id==ctx.member_id and (payload.role!="owner" or not payload.active):raise HTTPException(409,"不能停用或降级当前登录的企业主管账号")
  before={"role":row.role,"active":row.active};row.role=payload.role;row.active=payload.active
+ if not row.active:
+  revoke_member_sessions(db,row.id)
  audit_v2(db,ctx,"update_organization_member","organization_member",str(row.id),json.dumps({"before":before,"after":{"role":row.role,"active":row.active}},ensure_ascii=False));db.commit()
  return {"id":row.id,"organization_id":row.organization_id,"role":row.role,"active":row.active}
 
@@ -76,7 +88,7 @@ def tenant_room(db:Session,room_id:int,organization_id:int)->LiveRoom:
 
 @router.get("/device/binding")
 def get_binding(device:Device=Depends(current_v2_device),db:Session=Depends(get_db))->dict:
- row=db.scalar(select(DeviceRoomBinding).where(DeviceRoomBinding.device_id==device.device_id,DeviceRoomBinding.status=="active").order_by(DeviceRoomBinding.binding_type=="primary",DeviceRoomBinding.bound_at.desc()))
+ row=get_active_primary_binding(db,device.device_id,device.customer_id)
  return {"binding":binding_view(row) if row else None,"synced_at":datetime.now(timezone.utc)}
 
 @router.put("/device/binding")
@@ -88,7 +100,7 @@ def put_binding(payload:BindingPutIn,ctx:TenantContext=Depends(current_member),d
  if payload.binding_type=="primary":
   room_conflict=db.scalar(select(DeviceRoomBinding).where(DeviceRoomBinding.room_id==payload.room_id,DeviceRoomBinding.status=="active",DeviceRoomBinding.binding_type=="primary",DeviceRoomBinding.device_id!=device.device_id))
   if room_conflict:raise HTTPException(409,"该直播间已有主设备")
-  old=db.scalar(select(DeviceRoomBinding).where(DeviceRoomBinding.device_id==device.device_id,DeviceRoomBinding.status=="active",DeviceRoomBinding.binding_type=="primary"))
+  old=get_active_primary_binding(db,device.device_id,ctx.organization_id,for_update=True)
   if old:
    if old.room_id==payload.room_id and old.account_id==payload.account_id and old.anchor_id==payload.anchor_id:return {"binding":binding_view(old),"idempotent":True}
    old.status="ended";old.unbound_at=datetime.now(timezone.utc);old.reason=payload.reason or "换绑"
@@ -119,14 +131,15 @@ def heartbeat(payload:HeartbeatIn,device:Device=Depends(current_v2_device),db:Se
  existing=db.scalar(select(DeviceHeartbeatV2).where(DeviceHeartbeatV2.device_id==device.device_id,DeviceHeartbeatV2.sent_at==payload.sent_at))
  if existing:return {"server_time":datetime.now(timezone.utc),"heartbeat_interval_seconds":20,"binding_version":binding.version if binding else 0,"commands":[],"config_version":1,"idempotent":True}
  m=payload.metrics;row=DeviceHeartbeatV2(organization_id=device.customer_id,device_id=device.device_id,binding_id=payload.binding_id,agent_version=payload.agent_version,sent_at=payload.sent_at,uptime_seconds=payload.uptime_seconds,device_status=payload.status,live_software_json=payload.live_software.model_dump_json(),collection_json=payload.collection.model_dump_json(),cpu_percent=m.cpu_percent,memory_percent=m.memory_percent,network_latency_ms=m.network_latency_ms,upload_mbps=m.upload_mbps,stream_bitrate_kbps=m.stream_bitrate_kbps,dropped_frames=m.dropped_frames,last_success_at=payload.collection.last_success_at)
- db.add(row);device.last_seen=now_iso();device.last_heartbeat_at=now_iso();device.app_version=payload.agent_version;device.studio_state="running" if payload.live_software.running else "not_running";device.state_version+=1
+ received=datetime.now(timezone.utc);skew=int((received-payload.sent_at).total_seconds());row.received_at=received
+ db.add(row);device.last_seen=now_iso();device.last_heartbeat_at=received.isoformat();device.app_version=payload.agent_version;device.studio_state="running" if payload.live_software.running else "not_running";device.collector_state=payload.collection.status;device.cpu_percent=m.cpu_percent;device.memory_percent=m.memory_percent;device.network_latency_ms=m.network_latency_ms;device.upload_mbps=m.upload_mbps;device.stream_bitrate_kbps=m.stream_bitrate_kbps;device.dropped_frames=m.dropped_frames;device.clock_skew_seconds=skew;device.online_state="online";device.state_version+=1
  try:db.commit()
  except IntegrityError:db.rollback();return {"server_time":datetime.now(timezone.utc),"heartbeat_interval_seconds":20,"binding_version":binding.version if binding else 0,"commands":[],"config_version":1,"idempotent":True}
- return {"server_time":datetime.now(timezone.utc),"heartbeat_interval_seconds":20,"binding_version":binding.version if binding else 0,"commands":[],"config_version":1,"idempotent":False}
+ return {"server_time":received,"heartbeat_interval_seconds":20,"binding_version":binding.version if binding else 0,"clock_skew_warning":abs(skew)>300,"clock_skew_seconds":skew,"commands":[],"config_version":1,"idempotent":False}
 
 @router.get("/device/config")
 def device_config(device:Device=Depends(current_v2_device),db:Session=Depends(get_db))->dict:
- binding=db.scalar(select(DeviceRoomBinding).where(DeviceRoomBinding.device_id==device.device_id,DeviceRoomBinding.status=="active",DeviceRoomBinding.binding_type=="primary"))
+ binding=get_active_primary_binding(db,device.device_id,device.customer_id)
  return {"config_version":1,"heartbeat_interval_seconds":20,"binding":binding_view(binding) if binding else None,"allowed_commands":["refresh_config","sync_binding"],"commands":[]}
 
 @router.get("/organization/devices")
@@ -135,15 +148,16 @@ def realtime_devices(room_id:int|None=None,status:str="",version:str="",limit:in
  stmt=select(Device).where(Device.customer_id==ctx.organization_id)
  if room_id:stmt=stmt.where(Device.room_id==room_id)
  if version:stmt=stmt.where(Device.app_version==version)
+ total=db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
  rows=db.scalars(stmt.order_by(Device.last_heartbeat_at.desc()).offset(offset).limit(limit)).all();now=datetime.now(timezone.utc)
  result=[]
  for d in rows:
-  binding=db.scalar(select(DeviceRoomBinding).where(DeviceRoomBinding.device_id==d.device_id,DeviceRoomBinding.organization_id==ctx.organization_id,DeviceRoomBinding.status=="active",DeviceRoomBinding.binding_type=="primary"))
-  latest=db.scalar(select(DeviceHeartbeatV2).where(DeviceHeartbeatV2.device_id==d.device_id,DeviceHeartbeatV2.organization_id==ctx.organization_id).order_by(DeviceHeartbeatV2.received_at.desc()))
-  online=bool(latest and (now-(latest.received_at.replace(tzinfo=timezone.utc) if latest.received_at.tzinfo is None else latest.received_at)).total_seconds()<=90)
-  if status and status!=("online" if online else "offline"):continue
-  result.append({"device_id":d.device_id,"display_name":d.display_name or d.device_id,"online":online,"agent_version":d.app_version,"last_heartbeat_at":latest.received_at if latest else None,"binding":binding_view(binding) if binding else None,"live_software":json.loads(latest.live_software_json) if latest else {},"collection":json.loads(latest.collection_json) if latest else {},"metrics":{"cpu_percent":latest.cpu_percent,"memory_percent":latest.memory_percent,"network_latency_ms":latest.network_latency_ms,"upload_mbps":latest.upload_mbps} if latest else {}})
- return {"items":result,"limit":limit,"offset":offset}
+  age=(now-datetime.fromisoformat(d.last_heartbeat_at)).total_seconds() if d.last_heartbeat_at else 10**9
+  online_state="online" if age<=60 else ("unstable" if age<=180 else "offline")
+  if status and status!=online_state:continue
+  binding=get_active_primary_binding(db,d.device_id,ctx.organization_id)
+  result.append({"device_id":d.device_id,"display_name":d.display_name or d.device_id,"online":online_state=="online","online_state":online_state,"agent_version":d.app_version,"last_heartbeat_at":d.last_heartbeat_at,"binding":binding_view(binding) if binding else None,"studio_state":d.studio_state,"collector_state":d.collector_state,"metrics":{"cpu_percent":d.cpu_percent,"memory_percent":d.memory_percent,"network_latency_ms":d.network_latency_ms,"upload_mbps":d.upload_mbps,"stream_bitrate_kbps":d.stream_bitrate_kbps,"dropped_frames":d.dropped_frames}})
+ return {"items":result,"pagination":{"limit":limit,"offset":offset,"total":total}}
 
 @router.get("/platform/devices")
 def platform_realtime_devices(organization_id:int=Query(...,ge=1),room_id:int|None=None,status:str="",version:str="",limit:int=Query(100,ge=1,le=200),offset:int=Query(0,ge=0),admin:dict=Depends(current_platform_admin),db:Session=Depends(get_db))->dict:
