@@ -45,8 +45,9 @@ def test_repair_runner_records_failures_and_continues(monkeypatch):
     assert len(results) == 9 and not results[1].ok and results[-1].ok
 
 
-def test_custom_live_studio_path_has_priority(tmp_path):
+def test_custom_live_studio_path_has_priority(tmp_path, monkeypatch):
     executable = tmp_path / "TikTok LIVE Studio.exe"
     executable.write_bytes(b"MZ")
+    monkeypatch.setattr("client_v2.live_studio.powershell", lambda _command: "NotSigned")
     assert candidate_paths(str(executable))[0] == executable
     assert find_live_studio(str(executable)) == executable
