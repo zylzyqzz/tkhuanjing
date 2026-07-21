@@ -2,6 +2,12 @@ name: Build Windows Client
 
 on:
   workflow_dispatch:
+    inputs:
+      unsigned_preview:
+        description: "Build an unsigned preview installer for internal evaluation only"
+        required: true
+        default: false
+        type: boolean
   push:
     tags:
       - "v*"
@@ -40,6 +46,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Validate code-signing configuration
+        if: ${{ !inputs.unsigned_preview }}
         shell: pwsh
         env:
           CODE_SIGNING_PFX_BASE64: ${{ secrets.CODE_SIGNING_PFX_BASE64 }}
@@ -97,6 +104,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup build failed" }
 
       - name: Sign and verify executables
+        if: ${{ !inputs.unsigned_preview }}
         shell: pwsh
         env:
           CODE_SIGNING_PFX_BASE64: ${{ secrets.CODE_SIGNING_PFX_BASE64 }}
@@ -114,6 +122,17 @@ jobs:
             Remove-Item $pfx -Force -ErrorAction SilentlyContinue
           }
 
+      - name: Verify unsigned preview
+        if: ${{ inputs.unsigned_preview }}
+        shell: pwsh
+        run: |
+          $installer = Get-Item dist_setup_v2\*.exe
+          $signature = Get-AuthenticodeSignature $installer.FullName
+          if ($signature.Status -ne "NotSigned") {
+            throw "Unsigned preview unexpectedly has signature status: $($signature.Status)"
+          }
+          "UNSIGNED PREVIEW - INTERNAL EVALUATION ONLY" | Set-Content dist_setup_v2\UNSIGNED-PREVIEW.txt
+
       - name: Create checksums
         shell: pwsh
         run: |
@@ -125,5 +144,6 @@ jobs:
           path: |
             dist_setup_v2/*.exe
             dist_setup_v2/SHA256SUMS.txt
+            dist_setup_v2/UNSIGNED-PREVIEW.txt
           if-no-files-found: error
           retention-days: 30

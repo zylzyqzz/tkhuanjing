@@ -29,6 +29,12 @@ After configuring the secrets, manually run **Build Windows Client**. The job
 signs and verifies the client, updater, and installer, creates SHA-256 checksums,
 and uploads the artifact only if every gate succeeds.
 
+For an explicitly authorized internal visual evaluation, a manual workflow run
+may set `unsigned_preview` to `true`. This bypass applies only to that manually
+dispatched run, adds an `UNSIGNED-PREVIEW.txt` marker, and does not weaken tag or
+default release builds. An unsigned preview can trigger SmartScreen or antivirus
+warnings and must be replaced by a signed build before normal distribution.
+
 ## Certificate requirements
 
 - The certificate must be issued for Windows code signing and include its private key.
