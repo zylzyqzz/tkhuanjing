@@ -7,13 +7,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import Admin,AuditLog,Customer,Device,LiveRoom,now_iso
-from ..models_enterprise import AnchorProfile,DeviceHeartbeatV2,DeviceRoomBinding,LiveAccount,OrganizationMember,OrganizationMemberSession
-from ..schemas_v2 import AccountCreateIn,AnchorCreateIn,BindingDeleteIn,BindingPutIn,HeartbeatIn,MemberCreateIn,MemberLoginIn,MemberRoleUpdateIn
+from ..models_enterprise import AnchorProfile,DeviceFeatureOverride,DeviceHeartbeatV2,DeviceRoomBinding,FeatureDefinition,FeatureRollout,LiveAccount,OrganizationFeature,OrganizationMember,OrganizationMemberSession,PlanFeature
+from ..schemas_v2 import AccountCreateIn,AnchorCreateIn,BindingDeleteIn,BindingPutIn,FeatureAssignmentIn,FeatureAssignmentsIn,FeatureDefinitionIn,HeartbeatIn,MemberCreateIn,MemberLoginIn,MemberRoleUpdateIn,OnboardingProgressIn,RoomCreateIn
 from ..security import current_platform_admin,enforce_rate_limit,hasher,request_ip,require_platform_csrf,verify_password
 from ..enterprise.common import ROLE_PERMISSIONS,TenantContext,audit_v2,organization,organization_by_code,page,require_permission,tenant_row,token_hash
 from ..enterprise.organization_service import OrganizationService
 from ..enterprise.security import current_member,current_v2_device,revoke_member_sessions
 from ..enterprise.bindings import get_active_primary_binding
+from ..enterprise.features import FeatureService,require_feature,require_feature_permission,seed_feature_definitions
+from ..config import get_settings
 
 router=APIRouter(prefix="/api/v2",tags=["enterprise-v2"])
 
@@ -31,7 +33,7 @@ def member_login(payload:MemberLoginIn,request:Request,db:Session=Depends(get_db
  member=db.scalar(stmt)
  if not payload.organization_code:
   matches=db.scalars(stmt).all()
-  if len(matches)>1: raise HTTPException(400,"AUTH_ORGANIZATION_REQUIRED")
+  if len(matches)>1: raise HTTPException(400,{"code":"AUTH_ORGANIZATION_REQUIRED","message":"请输入企业代码后重新登录","details":{}})
   member=matches[0] if matches else None
  if not member or not verify_password(payload.password,member.password_hash):raise HTTPException(401,"账号或密码错误")
  organization(db,member.organization_id);token=secrets.token_urlsafe(32);expires=datetime.now(timezone.utc)+timedelta(hours=12)
@@ -76,6 +78,10 @@ def create_account(payload:AccountCreateIn,ctx:TenantContext=Depends(current_mem
  row=LiveAccount(organization_id=ctx.organization_id,room_id=payload.room_id,display_name=payload.display_name,platform_account_ref=payload.platform_account_ref,target_region_id=payload.target_region_id)
  db.add(row);db.flush();audit_v2(db,ctx,"create_live_account","live_account",str(row.id));db.commit();return {"id":row.id}
 
+@router.post("/organization/rooms")
+def create_room(payload:RoomCreateIn,ctx:TenantContext=Depends(current_member),db:Session=Depends(get_db),_feature:dict=Depends(require_feature_permission("device_binding","create")))->dict:
+ row=LiveRoom(customer_id=ctx.organization_id,name=payload.name,region=payload.region,status="active");db.add(row);db.flush();audit_v2(db,ctx,"create_live_room","live_room",str(row.id),json.dumps({"name":row.name,"region":row.region},ensure_ascii=False));db.commit();return {"id":row.id,"name":row.name,"region":row.region}
+
 @router.post("/organization/anchors")
 def create_anchor(payload:AnchorCreateIn,ctx:TenantContext=Depends(current_member),db:Session=Depends(get_db))->dict:
  require_permission(ctx,"binding.write");row=AnchorProfile(organization_id=ctx.organization_id,display_name=payload.display_name,employee_ref=payload.employee_ref)
@@ -92,7 +98,7 @@ def get_binding(device:Device=Depends(current_v2_device),db:Session=Depends(get_
  return {"binding":binding_view(row) if row else None,"synced_at":datetime.now(timezone.utc)}
 
 @router.put("/device/binding")
-def put_binding(payload:BindingPutIn,ctx:TenantContext=Depends(current_member),device:Device=Depends(current_v2_device),db:Session=Depends(get_db))->dict:
+def put_binding(payload:BindingPutIn,ctx:TenantContext=Depends(current_member),device:Device=Depends(current_v2_device),db:Session=Depends(get_db),_feature:dict=Depends(require_feature_permission("device_binding","update")))->dict:
  require_permission(ctx,"binding.write");organization(db,ctx.organization_id);tenant_room(db,payload.room_id,ctx.organization_id)
  if device.customer_id not in {None,ctx.organization_id}:raise HTTPException(403,"设备属于其他企业")
  if payload.account_id:tenant_row(db,LiveAccount,payload.account_id,ctx.organization_id)
@@ -124,6 +130,7 @@ def delete_binding(payload:BindingDeleteIn,ctx:TenantContext=Depends(current_mem
 def heartbeat(payload:HeartbeatIn,device:Device=Depends(current_v2_device),db:Session=Depends(get_db))->dict:
  if payload.device_id!=device.device_id:raise HTTPException(403,"心跳设备标识不匹配")
  if not device.customer_id:raise HTTPException(409,"设备尚未绑定企业")
+ if not FeatureService(db,device.customer_id).is_feature_enabled("device_heartbeat",device=device,client_version=payload.agent_version):raise HTTPException(403,{"code":"FEATURE_NOT_ENABLED","message":"当前企业尚未开通设备实时状态","details":{"feature_code":"device_heartbeat"}})
  binding=None
  if payload.binding_id:
   binding=db.scalar(select(DeviceRoomBinding).where(DeviceRoomBinding.id==payload.binding_id,DeviceRoomBinding.organization_id==device.customer_id,DeviceRoomBinding.device_id==device.device_id,DeviceRoomBinding.status=="active"))
@@ -156,10 +163,99 @@ def realtime_devices(room_id:int|None=None,status:str="",version:str="",limit:in
   online_state="online" if age<=60 else ("unstable" if age<=180 else "offline")
   if status and status!=online_state:continue
   binding=get_active_primary_binding(db,d.device_id,ctx.organization_id)
-  result.append({"device_id":d.device_id,"display_name":d.display_name or d.device_id,"online":online_state=="online","online_state":online_state,"agent_version":d.app_version,"last_heartbeat_at":d.last_heartbeat_at,"binding":binding_view(binding) if binding else None,"studio_state":d.studio_state,"collector_state":d.collector_state,"metrics":{"cpu_percent":d.cpu_percent,"memory_percent":d.memory_percent,"network_latency_ms":d.network_latency_ms,"upload_mbps":d.upload_mbps,"stream_bitrate_kbps":d.stream_bitrate_kbps,"dropped_frames":d.dropped_frames}})
+  result.append({"device_id":d.device_id,"display_name":d.display_name or d.device_id,"online":online_state=="online","online_state":online_state,"agent_version":d.app_version,"last_heartbeat_at":d.last_heartbeat_at,"binding":binding_view(binding) if binding else None,"studio_state":d.studio_state,"collector_state":d.collector_state,"live_software":{"name":"TikTok LIVE Studio","running":d.studio_state=="running"},"collection":{"status":d.collector_state},"metrics":{"cpu_percent":d.cpu_percent,"memory_percent":d.memory_percent,"network_latency_ms":d.network_latency_ms,"upload_mbps":d.upload_mbps,"stream_bitrate_kbps":d.stream_bitrate_kbps,"dropped_frames":d.dropped_frames}})
  return {"items":result,"pagination":{"limit":limit,"offset":offset,"total":total}}
 
 @router.get("/platform/devices")
 def platform_realtime_devices(organization_id:int=Query(...,ge=1),room_id:int|None=None,status:str="",version:str="",limit:int=Query(100,ge=1,le=200),offset:int=Query(0,ge=0),admin:dict=Depends(current_platform_admin),db:Session=Depends(get_db))->dict:
  organization(db,organization_id)
  return realtime_devices(room_id=room_id,status=status,version=version,limit=limit,offset=offset,ctx=TenantContext(organization_id,0,admin["username"],"owner"),db=db)
+
+
+def _feature_view(row:FeatureDefinition)->dict:
+ return {"id":row.id,"feature_code":row.feature_code,"feature_name":row.feature_name,"category":row.category,"description":row.description,"client_type":row.client_type,"default_enabled":row.default_enabled,"status":row.status,"minimum_client_version":row.minimum_client_version,"config_schema":json.loads(row.config_schema_json or "{}"),"updated_at":row.updated_at}
+
+@router.get("/organization/bootstrap")
+def organization_bootstrap(ctx:TenantContext=Depends(current_member),db:Session=Depends(get_db))->dict:
+ org=organization(db,ctx.organization_id);member=tenant_row(db,OrganizationMember,ctx.member_id,ctx.organization_id);features=FeatureService(db,ctx.organization_id).get_effective_features_for_organization(ctx.role)
+ limits={"max_devices":org.device_limit,"max_members":org.member_limit,"max_rooms":max(org.device_limit,1)}
+ for item in features.values():limits.update(item.get("limits",{}))
+ return {"organization":{"id":org.id,"name":org.name,"code":org.organization_code,"status":org.status,"plan_code":org.plan_code,"onboarding":{"step":org.onboarding_step,"completed":org.onboarding_completed,"total_steps":7}},"member":{"id":member.id,"username":member.username,"display_name":member.display_name,"role":member.role},"permissions":sorted(ROLE_PERMISSIONS.get(ctx.role,set())),"features":features,"limits":limits,"config_version":org.feature_config_version}
+
+@router.get("/organization/features")
+def organization_features(ctx:TenantContext=Depends(current_member),db:Session=Depends(get_db))->dict:
+ require_permission(ctx,"organization.read");return {"features":FeatureService(db,ctx.organization_id).get_effective_features_for_organization(ctx.role),"config_version":organization(db,ctx.organization_id).feature_config_version}
+
+@router.get("/organization/usage")
+def organization_usage(ctx:TenantContext=Depends(current_member),db:Session=Depends(get_db))->dict:
+ org=organization(db,ctx.organization_id)
+ return {"devices":{"used":db.scalar(select(func.count()).select_from(Device).where(Device.customer_id==ctx.organization_id,Device.status=="active")) or 0,"limit":org.device_limit},"rooms":{"used":db.scalar(select(func.count()).select_from(LiveRoom).where(LiveRoom.customer_id==ctx.organization_id,LiveRoom.status=="active")) or 0,"limit":max(org.device_limit,1)},"members":{"used":db.scalar(select(func.count()).select_from(OrganizationMember).where(OrganizationMember.organization_id==ctx.organization_id,OrganizationMember.active.is_(True))) or 0,"limit":org.member_limit}}
+
+@router.put("/organization/onboarding")
+def update_onboarding(payload:OnboardingProgressIn,ctx:TenantContext=Depends(current_member),db:Session=Depends(get_db))->dict:
+ require_permission(ctx,"organization.read");org=organization(db,ctx.organization_id);before={"step":org.onboarding_step,"completed":org.onboarding_completed};org.onboarding_step=max(org.onboarding_step,payload.step);org.onboarding_completed=payload.completed or org.onboarding_completed;audit_v2(db,ctx,"update_onboarding","customer",str(org.id),json.dumps({"before":before,"after":{"step":org.onboarding_step,"completed":org.onboarding_completed}},ensure_ascii=False));db.commit();return {"step":org.onboarding_step,"completed":org.onboarding_completed,"total_steps":7}
+
+@router.get("/device/bootstrap")
+def device_bootstrap(device:Device=Depends(current_v2_device),db:Session=Depends(get_db))->dict:
+ if not device.customer_id:raise HTTPException(409,{"code":"DEVICE_NOT_BOUND","message":"这台电脑还没有加入企业","details":{}})
+ org=organization(db,device.customer_id);settings=get_settings();binding=get_active_primary_binding(db,device.device_id,device.customer_id);features=FeatureService(db,device.customer_id).get_effective_features_for_device(device,device.app_version)
+ return {"device":{"device_id":device.device_id,"display_name":device.display_name or device.device_id,"status":device.status,"version":device.app_version},"organization":{"id":org.id,"name":org.name,"code":org.organization_code},"binding":binding_view(binding) if binding else None,"features":{code:item["enabled"] for code,item in features.items()},"feature_details":features,"config":{"heartbeat_interval_seconds":settings.heartbeat_interval_seconds,"queue_max_items":settings.heartbeat_queue_max_items,"queue_max_age_hours":settings.heartbeat_queue_max_age_hours,"allowed_commands":["refresh_config","sync_binding"]},"minimum_version":settings.minimum_client_version,"config_version":max(org.feature_config_version,device.feature_config_version)}
+
+@router.get("/platform/features")
+def platform_features(admin:dict=Depends(current_platform_admin),db:Session=Depends(get_db))->dict:
+ seed_feature_definitions(db);db.commit();rows=db.scalars(select(FeatureDefinition).order_by(FeatureDefinition.category,FeatureDefinition.feature_code)).all();return {"items":[_feature_view(x) for x in rows]}
+
+@router.post("/platform/features")
+def create_feature(payload:FeatureDefinitionIn,admin:dict=Depends(require_platform_csrf),db:Session=Depends(get_db))->dict:
+ if db.scalar(select(FeatureDefinition).where(FeatureDefinition.feature_code==payload.feature_code)):raise HTTPException(409,{"code":"FEATURE_CODE_EXISTS","message":"功能代码已存在","details":{"feature_code":payload.feature_code}})
+ row=FeatureDefinition(feature_code=payload.feature_code,feature_name=payload.feature_name,category=payload.category,description=payload.description,client_type=payload.client_type,default_enabled=payload.default_enabled,status=payload.status,minimum_client_version=payload.minimum_client_version,config_schema_json=json.dumps(payload.config_schema,ensure_ascii=False));db.add(row);db.flush();db.add(AuditLog(actor=admin["username"],action="create_feature",target_type="feature_definition",target_id=str(row.id),details=json.dumps(_feature_view(row),ensure_ascii=False,default=str)));db.commit();return _feature_view(row)
+
+@router.put("/platform/features/{feature_id}")
+def update_feature(feature_id:int,payload:FeatureDefinitionIn,admin:dict=Depends(require_platform_csrf),db:Session=Depends(get_db))->dict:
+ row=db.get(FeatureDefinition,feature_id)
+ if not row:raise HTTPException(404,{"code":"TENANT_RESOURCE_NOT_FOUND","message":"功能不存在"})
+ before=_feature_view(row)
+ for key in ("feature_code","feature_name","category","description","client_type","default_enabled","status","minimum_client_version"):setattr(row,key,getattr(payload,key))
+ row.config_schema_json=json.dumps(payload.config_schema,ensure_ascii=False);db.add(AuditLog(actor=admin["username"],action="update_feature",target_type="feature_definition",target_id=str(row.id),details=json.dumps({"before":before,"after":_feature_view(row)},ensure_ascii=False,default=str)));db.commit();return _feature_view(row)
+
+def _feature_by_code(db:Session,code:str)->FeatureDefinition:
+ seed_feature_definitions(db)
+ row=db.scalar(select(FeatureDefinition).where(FeatureDefinition.feature_code==code))
+ if not row:raise HTTPException(404,{"code":"FEATURE_NOT_FOUND","message":"功能不存在","details":{"feature_code":code}})
+ return row
+
+@router.get("/platform/plans/{plan_id}/features")
+def platform_plan_features(plan_id:str,admin:dict=Depends(current_platform_admin),db:Session=Depends(get_db))->dict:
+ seed_feature_definitions(db);rows=db.scalars(select(PlanFeature).where(PlanFeature.plan_id==plan_id)).all();defs={x.id:x for x in db.scalars(select(FeatureDefinition)).all()};return {"items":[{"feature_code":defs[x.feature_id].feature_code,"enabled":x.enabled,"limits":json.loads(x.limits_json or "{}"),"config":json.loads(x.config_json or "{}")} for x in rows if x.feature_id in defs]}
+
+@router.put("/platform/plans/{plan_id}/features")
+def update_plan_features(plan_id:str,payload:FeatureAssignmentsIn,admin:dict=Depends(require_platform_csrf),db:Session=Depends(get_db))->dict:
+ for item in payload.items:
+  feature=_feature_by_code(db,item.feature_code);row=db.scalar(select(PlanFeature).where(PlanFeature.plan_id==plan_id,PlanFeature.feature_id==feature.id)) or PlanFeature(plan_id=plan_id,feature_id=feature.id);row.enabled=item.enabled;row.limits_json=json.dumps(item.limits,ensure_ascii=False);row.config_json=json.dumps(item.config,ensure_ascii=False);db.add(row)
+ for org in db.scalars(select(Customer).where(Customer.plan_code==plan_id)).all():org.feature_config_version+=1
+ db.add(AuditLog(actor=admin["username"],action="update_plan_features",target_type="subscription_plan",target_id=plan_id,details=json.dumps(payload.model_dump(mode="json"),ensure_ascii=False)));db.commit();return {"ok":True}
+
+@router.get("/platform/organizations/{organization_id}/features")
+def platform_organization_features(organization_id:int,admin:dict=Depends(current_platform_admin),db:Session=Depends(get_db))->dict:
+ org=organization(db,organization_id);return {"organization":{"id":org.id,"name":org.name},"features":FeatureService(db,organization_id).get_effective_features_for_organization(),"config_version":org.feature_config_version}
+
+@router.put("/platform/organizations/{organization_id}/features")
+def update_organization_features(organization_id:int,payload:FeatureAssignmentsIn,admin:dict=Depends(require_platform_csrf),db:Session=Depends(get_db))->dict:
+ org=organization(db,organization_id)
+ for item in payload.items:
+  feature=_feature_by_code(db,item.feature_code);row=db.scalar(select(OrganizationFeature).where(OrganizationFeature.organization_id==organization_id,OrganizationFeature.feature_id==feature.id)) or OrganizationFeature(organization_id=organization_id,feature_id=feature.id,enabled=item.enabled);row.enabled=item.enabled;row.source=item.source;row.config_json=json.dumps(item.config,ensure_ascii=False);row.starts_at=item.starts_at;row.expires_at=item.expires_at;row.updated_by=admin["username"];db.add(row)
+ org.feature_config_version+=1;db.add(AuditLog(actor=admin["username"],action="update_organization_features",target_type="customer",target_id=str(org.id),details=json.dumps(payload.model_dump(mode="json"),ensure_ascii=False)));db.commit();return {"ok":True,"config_version":org.feature_config_version}
+
+@router.get("/platform/devices/{device_id}/features")
+def platform_device_features(device_id:str,admin:dict=Depends(current_platform_admin),db:Session=Depends(get_db))->dict:
+ device=db.get(Device,device_id)
+ if not device or not device.customer_id:raise HTTPException(404,{"code":"TENANT_RESOURCE_NOT_FOUND","message":"设备不存在或尚未加入企业"})
+ return {"device":{"device_id":device.device_id,"organization_id":device.customer_id},"features":FeatureService(db,device.customer_id).get_effective_features_for_device(device,device.app_version),"config_version":device.feature_config_version}
+
+@router.put("/platform/devices/{device_id}/features")
+def update_device_features(device_id:str,payload:FeatureAssignmentsIn,admin:dict=Depends(require_platform_csrf),db:Session=Depends(get_db))->dict:
+ device=db.get(Device,device_id)
+ if not device or not device.customer_id:raise HTTPException(404,{"code":"TENANT_RESOURCE_NOT_FOUND","message":"设备不存在或尚未加入企业"})
+ for item in payload.items:
+  feature=_feature_by_code(db,item.feature_code);row=db.scalar(select(DeviceFeatureOverride).where(DeviceFeatureOverride.device_id==device_id,DeviceFeatureOverride.feature_id==feature.id)) or DeviceFeatureOverride(organization_id=device.customer_id,device_id=device_id,feature_id=feature.id,enabled=item.enabled);row.enabled=item.enabled;row.config_json=json.dumps(item.config,ensure_ascii=False);row.reason=item.reason;row.expires_at=item.expires_at;db.add(row)
+ device.feature_config_version+=1;db.add(AuditLog(actor=admin["username"],action="update_device_features",target_type="device",target_id=device_id,details=json.dumps(payload.model_dump(mode="json"),ensure_ascii=False)));db.commit();return {"ok":True,"config_version":device.feature_config_version}

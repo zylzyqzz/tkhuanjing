@@ -123,7 +123,11 @@ async def request_context(request: Request, call_next):
 @app.exception_handler(HTTPException)
 async def http_error(request: Request, exc: HTTPException) -> JSONResponse:
     request_id = request.headers.get("X-Request-ID", "")
-    return JSONResponse(status_code=exc.status_code, content={"error": {"code": f"HTTP_{exc.status_code}", "message": str(exc.detail), "request_id": request_id}})
+    if isinstance(exc.detail, dict):
+        error = {"code": exc.detail.get("code", f"HTTP_{exc.status_code}"), "message": exc.detail.get("message", "请求未完成"), "details": exc.detail.get("details", {}), "request_id": request_id}
+    else:
+        error = {"code": f"HTTP_{exc.status_code}", "message": str(exc.detail), "request_id": request_id}
+    return JSONResponse(status_code=exc.status_code, content={"error": error})
 
 
 @app.exception_handler(RequestValidationError)

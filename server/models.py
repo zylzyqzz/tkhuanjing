@@ -82,6 +82,9 @@ class Customer(Base):
     grace_ends_at: Mapped[str | None] = mapped_column(String(40), nullable=True)
     wecom_webhook_encrypted: Mapped[str] = mapped_column(Text, default="")
     alert_settings_json: Mapped[str] = mapped_column(Text, default="{}")
+    feature_config_version: Mapped[int] = mapped_column(Integer, default=1)
+    onboarding_step: Mapped[int] = mapped_column(Integer, default=1)
+    onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[str] = mapped_column(String(40), default=now_iso)
     rooms: Mapped[list[LiveRoom]] = relationship(back_populates="customer")
 
@@ -141,6 +144,7 @@ class Device(Base):
     stream_bitrate_kbps: Mapped[float | None] = mapped_column(Float, nullable=True)
     dropped_frames: Mapped[int | None] = mapped_column(Integer, nullable=True)
     clock_skew_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    feature_config_version: Mapped[int] = mapped_column(Integer, default=1)
 
 
 class StreamingAccount(Base):

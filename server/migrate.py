@@ -144,7 +144,12 @@ def run(legacy: Path | None = None) -> Path | None:
                     raise
     # Phase 0+ enterprise tables are owned by Alembic revisions. Keep this
     # compatibility helper limited to the V1 schema for old SQLite installs.
-    enterprise_tables = {"organization_members", "organization_member_sessions", "live_accounts", "anchor_profiles", "device_room_bindings", "device_heartbeats_v2"}
+    enterprise_tables = {
+        "organization_members", "organization_member_sessions", "live_accounts",
+        "anchor_profiles", "device_room_bindings", "device_heartbeats_v2",
+        "feature_definitions", "plan_features", "organization_features",
+        "role_feature_permissions", "device_feature_overrides", "feature_rollouts",
+    }
     Base.metadata.create_all(engine, tables=[table for table in Base.metadata.sorted_tables if table.name not in enterprise_tables])
     with SessionLocal() as db:
         seed_admin(db)

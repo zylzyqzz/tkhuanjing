@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     ai_model: str = ""
     ai_timeout_seconds: float = 20.0
     report_retention_days: int = 180
+    heartbeat_interval_seconds: int = 20
+    heartbeat_queue_max_items: int = 500
+    heartbeat_queue_max_age_hours: int = 24
+    minimum_client_version: str = "2.1.0"
 
     @property
     def downloads_dir(self) -> Path:
