@@ -23,6 +23,8 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: admin/package-lock.json
+      - name: Install Qt headless runtime libraries
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0
       - run: python -m pip install ".[test]"
       - run: python -m compileall -q client_v2 server tests_v2
       - run: python -m pytest
