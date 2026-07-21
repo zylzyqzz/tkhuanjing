@@ -55,6 +55,24 @@ def test_empty_database_upgrade_downgrade_and_reupgrade(tmp_path):
     assert PHASE_TABLES <= table_names(database)
 
 
+def test_upgrade_preserves_pre_alembic_organization_members(tmp_path):
+    database = tmp_path / "legacy-members.sqlite3"
+    os.environ["TK_DATABASE_URL"] = f"sqlite:///{database.as_posix()}"
+    reset_server_modules()
+    with sqlite3.connect(database) as db:
+        db.execute("create table organization_members (id integer primary key, organization_id integer not null, user_id integer not null, role text not null, status text not null, joined_at text not null, removed_at text)")
+        db.execute("insert into organization_members values (1, 9, 12, 'owner', 'active', '2026-07-20T00:00:00+00:00', null)")
+        db.commit()
+
+    command.upgrade(alembic_config(), "head")
+
+    assert "organization_members_legacy_phase01" in table_names(database)
+    with sqlite3.connect(database) as db:
+        assert db.execute("select organization_id, user_id, role from organization_members_legacy_phase01").fetchone() == (9, 12, "owner")
+        columns = {row[1] for row in db.execute("pragma table_info(organization_members)")}
+        assert {"username", "password_hash", "permissions_json", "active"} <= columns
+
+
 def test_phase_models_compile_for_postgresql(tmp_path):
     os.environ["TK_DATABASE_URL"] = f"sqlite:///{(tmp_path / 'compile.sqlite3').as_posix()}"
     reset_server_modules()
