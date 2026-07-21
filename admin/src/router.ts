@@ -15,8 +15,10 @@ import PlaceholderView from'./views/PlaceholderView.vue'
 import AccessStateView from'./views/AccessStateView.vue'
 import PlatformDashboardView from'./views/PlatformDashboardView.vue'
 import OrganizationFeaturesView from'./views/OrganizationFeaturesView.vue'
+import PlanFeaturesView from'./views/PlanFeaturesView.vue'
+import DeviceFeaturesView from'./views/DeviceFeaturesView.vue'
 
-const platform=(path:string,name:string,title:string)=>({path:`/platform/${path}`,name,component:path==='overview'?PlatformDashboardView:path==='organizations'?PlatformView:path==='features'?FeatureCenterView:path==='organization-features'?OrganizationFeaturesView:PlaceholderView,meta:{audience:'platform',title}})
+const platform=(path:string,name:string,title:string)=>({path:`/platform/${path}`,name,component:path==='overview'?PlatformDashboardView:path==='organizations'?PlatformView:path==='subscriptions'?PlanFeaturesView:path==='features'?FeatureCenterView:path==='organization-features'?OrganizationFeaturesView:path==='devices'?DeviceFeaturesView:PlaceholderView,meta:{audience:'platform',title}})
 const enterprise=(path:string,name:string,title:string,component:any,feature?:string,permission?:string)=>({path:`/enterprise/${path}`,name,component,meta:{audience:'enterprise',title,feature,permission}})
 
 export const router=createRouter({history:createWebHistory('/tk-admin/'),routes:[
