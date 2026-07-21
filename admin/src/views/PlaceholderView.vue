@@ -1,0 +1,2 @@
+<script setup lang="ts">import{computed}from'vue';import{useRoute}from'vue-router';const route=useRoute();const title=computed(()=>String(route.meta.title||'功能模块'));</script>
+<template><section class="panel state-panel"><div class="state-icon">◇</div><span class="eyebrow">MODULE ROADMAP</span><h2>{{title}}</h2><p>该模块已进入产品信息架构，当前版本暂未开放。</p><small>开放后会在此页面显示功能说明、权限和使用入口。</small></section></template>
